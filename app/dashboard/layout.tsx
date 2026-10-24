@@ -35,9 +35,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           return;
         }
 
+        // Query global_role instead of role
         const { data: profile } = await supabase
           .from('profiles')
-          .select('role, full_name, roll_number')
+          .select('global_role, full_name, roll_number')
           .eq('id', session.user.id)
           .single();
 
@@ -45,7 +46,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           setUser({
             id: session.user.id,
             email: session.user.email || '',
-            role: profile?.role || 'MEMBER',
+            role: profile?.global_role || 'MEMBER',
             full_name: profile?.full_name,
             roll_number: profile?.roll_number,
           });
@@ -71,14 +72,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     } catch (err) {
       console.error('Sign out error:', err);
     } finally {
-      // Force hard navigation to clear Next.js client-side caches and cookies
+      // Hard redirect to clear all Supabase client session state and Next.js router cache
       window.location.replace('/login');
     }
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+      <div className="min-h-screen bg-[#070b14] flex items-center justify-center">
         <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
       </div>
     );
@@ -87,17 +88,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const role = user?.role?.toUpperCase();
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-zinc-100 flex flex-col">
+    <div className="min-h-screen bg-[#070b14] text-zinc-100 flex flex-col">
       {/* Chapter Top Navigation */}
-      <header className="border-b border-zinc-800/80 bg-zinc-950/70 backdrop-blur-md sticky top-0 z-40">
+      <header className="border-b border-zinc-800/80 bg-[#070b14]/80 backdrop-blur-md sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-6">
             <Link href="/" className="flex items-center gap-3">
-              <div className="relative h-8 w-8 overflow-hidden rounded-md bg-white flex items-center justify-center p-0.5 shadow-sm">
+              <div className="flex items-center justify-center bg-white rounded-md w-8 h-8 p-0.5 shadow-sm">
                 <Image
                   src="/acm-logo.jpg"
                   alt="ACM Logo"
-                  fill
+                  width={28}
+                  height={28}
                   className="object-contain"
                   priority
                 />
@@ -113,7 +115,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   href="/dashboard/chair"
                   className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                     pathname.startsWith('/dashboard/chair')
-                      ? 'bg-zinc-800 text-zinc-100'
+                      ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
                       : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
                   }`}
                 >
@@ -126,7 +128,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                   href="/dashboard/lead"
                   className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                     pathname.startsWith('/dashboard/lead')
-                      ? 'bg-zinc-800 text-zinc-100'
+                      ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
                       : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
                   }`}
                 >
@@ -138,7 +140,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 href="/dashboard/member"
                 className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
                   pathname.startsWith('/dashboard/member')
-                    ? 'bg-zinc-800 text-zinc-100'
+                    ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
                     : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
                 }`}
               >

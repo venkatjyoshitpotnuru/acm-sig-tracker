@@ -96,12 +96,13 @@ export default function LoginPage() {
     <div className="min-h-screen bg-[#070b14] text-zinc-100 flex items-center justify-center p-4 selection:bg-blue-600/30">
       <div className="w-full max-w-md bg-[#0c1222]/90 border border-blue-950/70 rounded-2xl p-8 backdrop-blur-xl shadow-2xl">
         <div className="flex flex-col items-center mb-8">
-          <div className="relative h-14 w-14 overflow-hidden rounded-xl bg-white flex items-center justify-center mb-4 p-1 shadow-inner">
+          <div className="flex items-center justify-center bg-white rounded-xl w-14 h-14 mb-4 p-1 shadow-inner">
             <Image
               src="/acm-logo.jpg"
               alt="ACM Logo"
-              fill
-              className="object-contain p-1"
+              width={48}
+              height={48}
+              className="object-contain"
               priority
             />
           </div>

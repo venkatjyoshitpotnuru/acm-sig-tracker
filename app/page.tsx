@@ -9,11 +9,12 @@ export default function LandingPage() {
       <nav className="border-b border-zinc-800/80 bg-[#070b14]/80 backdrop-blur-md sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="relative h-8 w-8 overflow-hidden rounded-md bg-white flex items-center justify-center p-0.5">
+            <div className="flex items-center justify-center bg-white rounded-md w-8 h-8 p-0.5">
               <Image 
                 src="/acm-logo.jpg" 
                 alt="ACM Logo" 
-                fill
+                width={28} 
+                height={28} 
                 className="object-contain" 
                 priority
               />
