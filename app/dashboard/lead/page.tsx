@@ -50,7 +50,8 @@ export default function LeadDashboard() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  // Lead Domain Info
+  // Lead Domain Info & Current User
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [leadSig, setLeadSig] = useState<{ id: string; name: string } | null>(null);
   const [domainMembers, setDomainMembers] = useState<DomainMember[]>([]);
   const [tasks, setTasks] = useState<SigTask[]>([]);
@@ -82,13 +83,14 @@ export default function LeadDashboard() {
       return;
     }
 
-    const currentUserId = session.user.id;
+    const uid = session.user.id;
+    setCurrentUserId(uid);
 
     // 1. Fetch Lead membership to identify which SIG this user leads
     const { data: leadMembership, error: leadError } = await supabase
       .from('sig_memberships')
       .select('sig_id, role, sigs(id, name)')
-      .eq('user_id', currentUserId)
+      .eq('user_id', uid)
       .eq('role', 'LEAD')
       .eq('status', 'APPROVED')
       .maybeSingle();
@@ -191,7 +193,7 @@ export default function LeadDashboard() {
 
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!leadSig) return;
+    if (!leadSig || !currentUserId) return;
     if (!title.trim()) {
       alert('Task title is required.');
       return;
@@ -222,10 +224,12 @@ export default function LeadDashboard() {
 
     try {
       for (const uid of targetAssigneeIds) {
+        // Insert with created_by field included
         const { data: insertedTask, error: taskErr } = await supabase
           .from('tasks')
           .insert({
             sig_id: leadSig.id,
+            created_by: currentUserId, // Fixes not-null constraint
             assigned_to: uid,
             title,
             description,
