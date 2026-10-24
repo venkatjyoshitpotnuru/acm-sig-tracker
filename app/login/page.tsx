@@ -17,7 +17,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Clear loading state on mount or when switching modes
   useEffect(() => {
     setLoading(false);
     setErrorMsg(null);
@@ -41,7 +40,7 @@ export default function LoginPage() {
             data: {
               full_name: fullName.trim(),
               roll_number: formattedRoll,
-              role: 'MEMBER',
+              global_role: 'MEMBER',
             },
           },
         });
@@ -62,10 +61,10 @@ export default function LoginPage() {
         if (signInError) throw signInError;
 
         if (signInData.user) {
-          // Fetch user profile to route correctly by role
+          // Query global_role directly from the profiles table
           const { data: profile, error: profileError } = await supabase
             .from('profiles')
-            .select('role')
+            .select('global_role')
             .eq('id', signInData.user.id)
             .single();
 
@@ -74,7 +73,7 @@ export default function LoginPage() {
             return;
           }
 
-          const role = profile.role?.toUpperCase();
+          const role = profile.global_role?.toUpperCase();
           if (role === 'CHAIR') {
             router.replace('/dashboard/chair');
           } else if (role === 'LEAD') {
@@ -89,14 +88,13 @@ export default function LoginPage() {
       console.error('Authentication Error:', err);
       setErrorMsg(err.message || 'Authentication failed. Please check your credentials.');
     } finally {
-      // Release button loading state if navigation has not unmounted the view
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-zinc-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-md bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-8 backdrop-blur-xl shadow-2xl">
+    <div className="min-h-screen bg-[#070b14] text-zinc-100 flex items-center justify-center p-4 selection:bg-blue-600/30">
+      <div className="w-full max-w-md bg-[#0c1222]/90 border border-blue-950/70 rounded-2xl p-8 backdrop-blur-xl shadow-2xl">
         <div className="flex flex-col items-center mb-8">
           <div className="relative h-14 w-14 overflow-hidden rounded-xl bg-white flex items-center justify-center mb-4 p-1 shadow-inner">
             <Image
@@ -129,7 +127,7 @@ export default function LoginPage() {
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 placeholder="e.g. John Doe"
-                className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-100 placeholder-zinc-600 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+                className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-950/80 border border-zinc-800 text-zinc-100 placeholder-zinc-600 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors"
               />
             </div>
           )}
@@ -142,7 +140,7 @@ export default function LoginPage() {
               value={rollNumber}
               onChange={(e) => setRollNumber(e.target.value)}
               placeholder="e.g. CB.EN.U4AIE24000"
-              className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-100 placeholder-zinc-600 text-sm uppercase focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-950/80 border border-zinc-800 text-zinc-100 placeholder-zinc-600 text-sm uppercase focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors"
             />
           </div>
 
@@ -154,7 +152,7 @@ export default function LoginPage() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••"
-              className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-950 border border-zinc-800 text-zinc-100 placeholder-zinc-600 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              className="w-full px-3.5 py-2.5 rounded-lg bg-zinc-950/80 border border-zinc-800 text-zinc-100 placeholder-zinc-600 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors"
             />
           </div>
 
