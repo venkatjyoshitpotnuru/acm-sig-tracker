@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Loader2 } from 'lucide-react';
@@ -32,7 +31,6 @@ export default function LoginPage() {
 
     try {
       if (isSignUp) {
-        // Sign Up Flow
         const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
           email: mappedEmail,
           password: password,
@@ -52,7 +50,6 @@ export default function LoginPage() {
           return;
         }
       } else {
-        // Sign In Flow
         const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
           email: mappedEmail,
           password: password,
@@ -61,7 +58,6 @@ export default function LoginPage() {
         if (signInError) throw signInError;
 
         if (signInData.user) {
-          // Query global_role directly from the profiles table
           const { data: profile, error: profileError } = await supabase
             .from('profiles')
             .select('global_role')
@@ -96,14 +92,11 @@ export default function LoginPage() {
     <div className="min-h-screen bg-[#070b14] text-zinc-100 flex items-center justify-center p-4 selection:bg-blue-600/30">
       <div className="w-full max-w-md bg-[#0c1222]/90 border border-blue-950/70 rounded-2xl p-8 backdrop-blur-xl shadow-2xl">
         <div className="flex flex-col items-center mb-8">
-          <div className="flex items-center justify-center bg-white rounded-xl w-14 h-14 mb-4 p-1 shadow-inner">
-            <Image
+          <div className="bg-white rounded-xl mb-4 p-1 shadow-inner flex-shrink-0">
+            <img
               src="/acm-logo.jpg"
               alt="ACM Logo"
-              width={48}
-              height={48}
-              className="object-contain"
-              priority
+              className="w-12 h-12 object-contain"
             />
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-white">Chapter Portal</h1>

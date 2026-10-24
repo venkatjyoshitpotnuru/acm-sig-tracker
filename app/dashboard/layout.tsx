@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { LogOut, Loader2 } from 'lucide-react';
@@ -35,7 +34,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           return;
         }
 
-        // Query global_role instead of role
         const { data: profile } = await supabase
           .from('profiles')
           .select('global_role, full_name, roll_number')
@@ -72,7 +70,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     } catch (err) {
       console.error('Sign out error:', err);
     } finally {
-      // Hard redirect to clear all Supabase client session state and Next.js router cache
       window.location.replace('/login');
     }
   };
@@ -94,14 +91,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-6">
             <Link href="/" className="flex items-center gap-3">
-              <div className="flex items-center justify-center bg-white rounded-md w-8 h-8 p-0.5 shadow-sm">
-                <Image
+              <div className="bg-white rounded-md p-0.5 shadow-sm flex-shrink-0">
+                <img
                   src="/acm-logo.jpg"
                   alt="ACM Logo"
-                  width={28}
-                  height={28}
-                  className="object-contain"
-                  priority
+                  className="w-7 h-7 object-contain"
                 />
               </div>
               <span className="font-semibold text-sm tracking-tight text-zinc-200 hidden sm:inline">
