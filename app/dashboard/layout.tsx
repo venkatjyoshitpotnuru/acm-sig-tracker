@@ -1,178 +1,293 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { LogOut, Loader2 } from 'lucide-react';
+import { Loader2, Layers, CheckCircle2, Clock, CheckSquare, Square } from 'lucide-react';
 
-interface NavUser {
+interface Sig {
   id: string;
-  email: string;
-  role: string;
-  full_name?: string;
-  roll_number?: string;
+  name: string;
+  description: string;
 }
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
-  const supabase = createClient();
+interface Membership {
+  sig_id: string;
+  status: string; // 'PENDING' | 'APPROVED'
+  role: string;
+  semester: string | number | null;
+}
 
-  const [user, setUser] = useState<NavUser | null>(null);
+interface Subtask {
+  id: string;
+  task_id: string;
+  title: string;
+  is_completed: boolean;
+}
+
+interface Task {
+  id: string;
+  sig_id: string;
+  title: string;
+  description: string;
+  due_date: string;
+  priority: string;
+  subtasks: Subtask[];
+}
+
+export default function StudentDashboard() {
+  const supabase = createClient();
+  const [userId, setUserId] = useState<string | null>(null);
+  const [sigs, setSigs] = useState<Sig[]>([]);
+  const [memberships, setMemberships] = useState<Membership[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [semester, setSemester] = useState<string>('3');
   const [loading, setLoading] = useState(true);
-  const [signingOut, setSigningOut] = useState(false);
+  const [requestingSigId, setRequestingSigId] = useState<string | null>(null);
 
   useEffect(() => {
-    let mounted = true;
+    fetchStudentWorkspace();
+  }, []);
 
-    async function loadUser() {
-      try {
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+  const fetchStudentWorkspace = async () => {
+    setLoading(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.user) return;
+    const uid = session.user.id;
+    setUserId(uid);
 
-        if (sessionError || !session?.user) {
-          if (mounted) window.location.replace('/login');
-          return;
-        }
+    const [
+      { data: sigsData },
+      { data: memData },
+      { data: tasksData },
+      { data: subtasksData }
+    ] = await Promise.all([
+      supabase.from('sigs').select('*').order('name', { ascending: true }),
+      supabase.from('sig_memberships').select('*').eq('user_id', uid),
+      supabase.from('tasks').select('*').eq('assigned_to', uid),
+      supabase.from('subtasks').select('*')
+    ]);
 
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('global_role, full_name, roll_number')
-          .eq('id', session.user.id)
-          .single();
+    setSigs(sigsData || []);
+    setMemberships(memData || []);
 
-        if (mounted) {
-          setUser({
-            id: session.user.id,
-            email: session.user.email || '',
-            role: profile?.global_role || 'MEMBER',
-            full_name: profile?.full_name,
-            roll_number: profile?.roll_number,
-          });
-          setLoading(false);
-        }
-      } catch (err) {
-        console.error('Session verification error:', err);
-        if (mounted) window.location.replace('/login');
-      }
+    if (memData && memData.length > 0 && memData[0].semester) {
+      setSemester(String(memData[0].semester));
     }
 
-    loadUser();
+    const allSubtasks: Subtask[] = subtasksData || [];
+    const userTasks: Task[] = (tasksData || []).map((t: any) => ({
+      ...t,
+      subtasks: allSubtasks.filter((st) => st.task_id === t.id)
+    }));
+    setTasks(userTasks);
+    setLoading(false);
+  };
 
-    return () => {
-      mounted = false;
-    };
-  }, [supabase]);
+  const handleRequestToJoin = async (sigId: string) => {
+    if (!userId) return;
+    setRequestingSigId(sigId);
 
-  const handleSignOut = async () => {
-    try {
-      setSigningOut(true);
-      await supabase.auth.signOut();
-    } catch (err) {
-      console.error('Sign out error:', err);
-    } finally {
-      window.location.replace('/login');
+    const { error } = await supabase.from('sig_memberships').insert({
+      user_id: userId,
+      sig_id: sigId,
+      role: 'MEMBER',
+      status: 'PENDING',
+      semester: semester
+    });
+
+    if (error) {
+      alert('Error requesting domain: ' + error.message);
+    } else {
+      await fetchStudentWorkspace();
     }
+    setRequestingSigId(null);
+  };
+
+  const handleToggleSubtask = async (st: Subtask) => {
+    const newVal = !st.is_completed;
+    await supabase
+      .from('subtasks')
+      .update({
+        is_completed: newVal,
+        completed_at: newVal ? new Date().toISOString() : null
+      })
+      .eq('id', st.id);
+    await fetchStudentWorkspace();
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#070b14] flex items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
       </div>
     );
   }
 
-  const role = user?.role?.toUpperCase();
+  const approvedMemberships = memberships.filter((m) => m.status === 'APPROVED');
+  const totalSubtasks = tasks.reduce((acc, t) => acc + t.subtasks.length, 0);
+  const completedSubtasks = tasks.reduce(
+    (acc, t) => acc + t.subtasks.filter((st) => st.is_completed).length,
+    0
+  );
+  const overallProgress =
+    totalSubtasks > 0 ? Math.round((completedSubtasks / totalSubtasks) * 100) : 0;
 
   return (
-    <div className="min-h-screen bg-[#070b14] text-zinc-100 flex flex-col">
-      {/* Chapter Top Navigation */}
-      <header className="border-b border-zinc-800/80 bg-[#070b14]/80 backdrop-blur-md sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <Link href="/" className="flex items-center gap-3">
-              <div className="bg-white rounded-md p-0.5 shadow-sm flex-shrink-0">
-                <img
-                  src="/acm-logo.jpg"
-                  alt="ACM Logo"
-                  className="w-7 h-7 object-contain"
-                />
-              </div>
-              <span className="font-semibold text-sm tracking-tight text-zinc-200 hidden sm:inline">
-                ACM Portal
-              </span>
-            </Link>
-
-            <nav className="flex items-center gap-1">
-              {role === 'CHAIR' && (
-                <Link
-                  href="/dashboard/chair"
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                    pathname.startsWith('/dashboard/chair')
-                      ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
-                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
-                  }`}
-                >
-                  Executive Suite
-                </Link>
-              )}
-
-              {(role === 'CHAIR' || role === 'LEAD') && (
-                <Link
-                  href="/dashboard/lead"
-                  className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                    pathname.startsWith('/dashboard/lead')
-                      ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
-                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
-                  }`}
-                >
-                  Domain Lead Suite
-                </Link>
-              )}
-
-              <Link
-                href="/dashboard/member"
-                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                  pathname.startsWith('/dashboard/member')
-                    ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
-                }`}
-              >
-                Student Portal
-              </Link>
-            </nav>
+    <div className="space-y-8">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-950/40 border border-blue-900/60 text-xs font-medium text-blue-300 w-fit mb-2">
+            <Layers className="h-3.5 w-3.5 text-blue-400" />
+            <span>Student Portal</span>
           </div>
+          <h1 className="text-2xl font-bold tracking-tight text-white">My Workspace</h1>
+          <p className="text-sm text-zinc-400">
+            Track your deliverables, domain enrollments, and semester milestones.
+          </p>
+        </div>
 
-          <div className="flex items-center gap-3">
-            <div className="text-right hidden sm:block">
-              <p className="text-xs font-medium text-zinc-200">
-                {user?.roll_number || user?.full_name || 'Member'}
-              </p>
-              <p className="text-[10px] text-zinc-500 uppercase tracking-wider">{user?.role}</p>
+        <div className="flex items-center gap-2 bg-[#0c1222] border border-blue-950/70 px-3.5 py-2 rounded-xl w-fit">
+          <span className="text-xs text-zinc-400">Current Semester:</span>
+          <select
+            value={semester}
+            onChange={(e) => setSemester(e.target.value)}
+            className="bg-[#070b14] border border-blue-950/80 rounded px-2 py-1 text-xs text-white focus:outline-none"
+          >
+            {[1, 2, 3, 4, 5, 6, 7, 8].map((s) => (
+              <option key={s} value={String(s)}>
+                Sem {s}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Metrics Grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-5 shadow-lg">
+          <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-2">
+            Enrolled Domains
+          </h3>
+          <p className="text-3xl font-bold text-white">{approvedMemberships.length}</p>
+        </div>
+        <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-5 shadow-lg">
+          <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-2">
+            Total Deliverables
+          </h3>
+          <p className="text-3xl font-bold text-white">{tasks.length}</p>
+        </div>
+        <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-5 shadow-lg">
+          <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-2">
+            Overall Progress
+          </h3>
+          <div className="mt-3">
+            <div className="flex justify-between text-xs mb-1.5">
+              <span className="text-zinc-400">Completion Rate</span>
+              <span className="text-blue-400 font-medium">{overallProgress}%</span>
             </div>
-
-            <button
-              onClick={handleSignOut}
-              disabled={signingOut}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-800 bg-zinc-900/60 hover:bg-zinc-900 hover:border-zinc-700 text-zinc-300 text-xs transition-colors disabled:opacity-50"
-            >
-              {signingOut ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <>
-                  <LogOut className="h-3.5 w-3.5 text-zinc-400" />
-                  <span>Sign Out</span>
-                </>
-              )}
-            </button>
+            <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue-500 rounded-full"
+                style={{ width: `${overallProgress}%` }}
+              />
+            </div>
           </div>
         </div>
-      </header>
+      </div>
 
-      {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
-        {children}
-      </main>
+      {/* Main Content */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Deliverables */}
+        <div className="lg:col-span-2 bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-6 shadow-lg space-y-4">
+          <h3 className="text-base font-semibold text-white">Assigned Deliverables</h3>
+          {tasks.length === 0 ? (
+            <div className="p-8 text-center text-zinc-500 text-sm border border-dashed border-zinc-800 rounded-xl">
+              You have no pending deliverables.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {tasks.map((task) => (
+                <div
+                  key={task.id}
+                  className="p-4 rounded-xl bg-[#070b14]/70 border border-zinc-800/80 space-y-3"
+                >
+                  <div>
+                    <h4 className="font-semibold text-white text-sm">{task.title}</h4>
+                    <p className="text-xs text-zinc-400 mt-1">{task.description}</p>
+                  </div>
+                  <div className="space-y-1.5 pt-2 border-t border-zinc-800/60">
+                    {task.subtasks.map((st) => (
+                      <button
+                        key={st.id}
+                        onClick={() => handleToggleSubtask(st)}
+                        className="w-full flex items-center gap-2 text-left text-xs text-zinc-300 hover:text-white py-1"
+                      >
+                        {st.is_completed ? (
+                          <CheckSquare className="h-4 w-4 text-blue-500 shrink-0" />
+                        ) : (
+                          <Square className="h-4 w-4 text-zinc-600 shrink-0" />
+                        )}
+                        <span className={st.is_completed ? 'line-through text-zinc-500' : ''}>
+                          {st.title}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Domain Hub */}
+        <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-6 shadow-lg space-y-4">
+          <h3 className="text-base font-semibold text-white">Domain Hub</h3>
+          <div className="space-y-3">
+            {sigs.map((sig) => {
+              const existingRecord = memberships.find((m) => m.sig_id === sig.id);
+              const isPending = existingRecord?.status === 'PENDING';
+              const isApproved = existingRecord?.status === 'APPROVED';
+
+              return (
+                <div
+                  key={sig.id}
+                  className="p-4 rounded-xl bg-[#070b14]/60 border border-zinc-800/80 space-y-3"
+                >
+                  <div>
+                    <h4 className="font-semibold text-white text-sm">{sig.name}</h4>
+                    <p className="text-xs text-zinc-400 mt-1">{sig.description}</p>
+                  </div>
+
+                  {isApproved ? (
+                    <div className="w-full py-2 px-3 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 bg-green-500/10 border border-green-500/30 text-green-400">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span>Enrolled</span>
+                    </div>
+                  ) : isPending ? (
+                    <div className="w-full py-2 px-3 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                      <Clock className="h-3.5 w-3.5" />
+                      <span>Pending Chair Approval</span>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => handleRequestToJoin(sig.id)}
+                      disabled={requestingSigId === sig.id}
+                      className="w-full py-2 px-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      {requestingSigId === sig.id ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <span>Request to Join →</span>
+                      )}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

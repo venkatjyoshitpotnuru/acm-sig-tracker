@@ -3,111 +3,370 @@
 import { useState, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { deleteUserAccount } from '@/app/actions/admin';
-import { 
-  Users, 
-  Clock, 
-  ShieldCheck, 
-  Activity, 
-  Search, 
-  Trash2, 
-  Loader2, 
-  Check, 
-  X 
+import {
+  Users,
+  Clock,
+  ShieldCheck,
+  Activity,
+  Search,
+  Trash2,
+  UserMinus,
+  Loader2,
+  Check,
+  X,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  CheckSquare,
+  Square,
+  Shield
 } from 'lucide-react';
 
-interface Profile {
+interface Sig {
   id: string;
-  full_name: string;
-  roll_number: string;
-  global_role: string;
-  domain: string | null;
+  name: string;
+  description: string;
+}
+
+interface Subtask {
+  id: string;
+  task_id: string;
+  title: string;
+  is_completed: boolean;
+}
+
+interface Task {
+  id: string;
+  sig_id: string;
+  title: string;
+  description: string;
+  due_date: string;
+  priority: string;
+  assigned_to: string;
+  subtasks: Subtask[];
+}
+
+interface RosterMember {
+  userId: string;
+  fullName: string;
+  rollNumber: string;
+  globalRole: string;
+  sigId: string | null;
+  sigName: string | null;
+  sigRole: string; // 'MEMBER' | 'LEAD'
+  membershipStatus: string | null; // 'APPROVED' | 'PENDING' | null
   semester: string | null;
-  status?: string | null;
-  created_at?: string;
+  completedSubtasks: number;
+  totalSubtasks: number;
+  progressPercent: number;
+  createdAt: string;
+}
+
+interface PendingRequest {
+  userId: string;
+  sigId: string;
+  sigName: string;
+  fullName: string;
+  rollNumber: string;
+  semester: string | null;
 }
 
 export default function ChairDashboard() {
   const supabase = createClient();
-  const [members, setMembers] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  // Switchable Tabs
+  const [activeTab, setActiveTab] = useState<'overview' | 'roster' | 'requests' | 'my-tasks'>('overview');
+  const [expandedSigId, setExpandedSigId] = useState<string | null>(null);
+
+  // Data States
+  const [sigs, setSigs] = useState<Sig[]>([]);
+  const [roster, setRoster] = useState<RosterMember[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<PendingRequest[]>([]);
+  const [myTasks, setMyTasks] = useState<Task[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  
-  // Tab switcher state
-  const [activeTab, setActiveTab] = useState<'overview' | 'roster' | 'requests' | 'sig-details'>('overview');
-  const [selectedSigTab, setSelectedSigTab] = useState<'SIG-AI' | 'SIG-Web Dev' | 'SIG-Cyber' | 'SIG-Glitch'>('SIG-AI');
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
 
   useEffect(() => {
-    fetchMembers();
+    fetchAllChairData();
   }, []);
 
-  const fetchMembers = async () => {
-    // Strict chronological sort: First-come, first-placed (newest members at the bottom)
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .order('created_at', { ascending: true });
+  const fetchAllChairData = async () => {
+    setLoading(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    const uid = session?.user?.id || null;
+    setCurrentUserId(uid);
 
-    if (error) {
-      console.error('Error fetching members:', error);
-    } else if (data) {
-      setMembers(data);
+    const [
+      { data: sigsData },
+      { data: profilesData },
+      { data: membershipsData },
+      { data: tasksData },
+      { data: subtasksData }
+    ] = await Promise.all([
+      supabase.from('sigs').select('*').order('name', { ascending: true }),
+      supabase.from('profiles').select('*').order('created_at', { ascending: true }),
+      supabase.from('sig_memberships').select('*'),
+      supabase.from('tasks').select('*'),
+      supabase.from('subtasks').select('*')
+    ]);
+
+    const allSigs: Sig[] = sigsData || [];
+    const allProfiles = profilesData || [];
+    const allMemberships = membershipsData || [];
+    const allTasks = tasksData || [];
+    const allSubtasks: Subtask[] = subtasksData || [];
+
+    setSigs(allSigs);
+
+    // Map tasks with their subtasks
+    const tasksWithSubtasks: Task[] = allTasks.map((t: any) => ({
+      ...t,
+      subtasks: allSubtasks.filter((st) => st.task_id === t.id)
+    }));
+
+    if (uid) {
+      setMyTasks(tasksWithSubtasks.filter((t) => t.assigned_to === uid));
     }
+
+    // Build Pending Requests Queue from sig_memberships where status === 'PENDING'
+    const pendingList: PendingRequest[] = [];
+    allMemberships
+      .filter((m: any) => m.status === 'PENDING')
+      .forEach((m: any) => {
+        const prof = allProfiles.find((p: any) => p.id === m.user_id);
+        const sigObj = allSigs.find((s) => s.id === m.sig_id);
+        if (prof && sigObj) {
+          const roll = prof.roll_number || (prof.email ? prof.email.split('@')[0].toUpperCase() : 'N/A');
+          pendingList.push({
+            userId: prof.id,
+            sigId: sigObj.id,
+            sigName: sigObj.name,
+            fullName: prof.full_name || 'Unknown User',
+            rollNumber: roll,
+            semester: m.semester ? String(m.semester) : 'N/A'
+          });
+        }
+      });
+    setPendingRequests(pendingList);
+
+    // Build Master Roster (First-come, first-placed based on profiles created_at ascending)
+    const rosterList: RosterMember[] = allProfiles.map((prof: any) => {
+      // Only attach APPROVED membership to active roster row
+      const approvedMembership = allMemberships.find(
+        (m: any) => m.user_id === prof.id && m.status === 'APPROVED'
+      );
+      const sigObj = approvedMembership
+        ? allSigs.find((s) => s.id === approvedMembership.sig_id) || null
+        : null;
+
+      // Calculate user's subtask progress
+      const userTasks = tasksWithSubtasks.filter((t) => t.assigned_to === prof.id);
+      let totalSt = 0;
+      let completedSt = 0;
+      userTasks.forEach((t) => {
+        totalSt += t.subtasks.length;
+        completedSt += t.subtasks.filter((st) => st.is_completed).length;
+      });
+      const pct = totalSt > 0 ? Math.round((completedSt / totalSt) * 100) : 0;
+
+      const roll = prof.roll_number || (prof.email ? prof.email.split('@')[0].toUpperCase() : 'N/A');
+
+      return {
+        userId: prof.id,
+        fullName: prof.full_name || 'Unknown User',
+        rollNumber: roll,
+        globalRole: prof.global_role || 'MEMBER',
+        sigId: sigObj ? sigObj.id : null,
+        sigName: sigObj ? sigObj.name : null,
+        sigRole: approvedMembership?.role || 'MEMBER',
+        membershipStatus: approvedMembership ? 'APPROVED' : null,
+        semester: approvedMembership?.semester ? String(approvedMembership.semester) : 'N/A',
+        completedSubtasks: completedSt,
+        totalSubtasks: totalSt,
+        progressPercent: pct,
+        createdAt: prof.created_at || ''
+      };
+    });
+
+    setRoster(rosterList);
     setLoading(false);
   };
 
-  const handleRemoveFromState = (id: string) => {
-    setMembers((prev) => prev.filter((m) => m.id !== id));
+  // --- ACTIONS ---
+
+  const handleAssignDomain = async (userId: string, newSigId: string) => {
+    setUpdatingId(userId);
+    if (!newSigId) {
+      // Remove from domain
+      await supabase.from('sig_memberships').delete().eq('user_id', userId);
+    } else {
+      // Check if membership row exists for user
+      const { data: existing } = await supabase
+        .from('sig_memberships')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (existing && existing.length > 0) {
+        await supabase
+          .from('sig_memberships')
+          .update({ sig_id: newSigId, status: 'APPROVED' })
+          .eq('user_id', userId);
+      } else {
+        await supabase.from('sig_memberships').insert({
+          user_id: userId,
+          sig_id: newSigId,
+          role: 'MEMBER',
+          status: 'APPROVED'
+        });
+      }
+    }
+    await fetchAllChairData();
+    setUpdatingId(null);
   };
 
-  const handleUpdateMemberState = (id: string, updates: Partial<Profile>) => {
-    setMembers((prev) => prev.map(m => m.id === id ? { ...m, ...updates } : m));
+  const handleSigRoleChange = async (userId: string, sigId: string | null, newRole: string) => {
+    if (!sigId) {
+      alert('Assign the member to a SIG domain first before setting their Lead/Member role.');
+      return;
+    }
+    setUpdatingId(userId);
+    const { error } = await supabase
+      .from('sig_memberships')
+      .update({ role: newRole })
+      .eq('user_id', userId)
+      .eq('sig_id', sigId);
+
+    if (error) {
+      alert('Failed to update role: ' + error.message);
+    }
+    await fetchAllChairData();
+    setUpdatingId(null);
   };
 
-  // Separate Pending Requests from Active Roster Members
-  const pendingRequests = members.filter(m => m.status === 'PENDING');
-  const activeMembers = members.filter(m => m.status !== 'PENDING' && m.global_role !== 'CHAIR');
+  const handleRemoveFromDomain = async (userId: string, fullName: string) => {
+    if (!confirm(`Remove ${fullName} from their assigned domain?`)) return;
+    setUpdatingId(userId);
+    await supabase.from('sig_memberships').delete().eq('user_id', userId);
+    await fetchAllChairData();
+    setUpdatingId(null);
+  };
 
-  // Filtered members for the Roster search bar
-  const filteredActiveRoster = members.filter((m) => 
-    m.status !== 'PENDING' && (
-      (m.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (m.roll_number || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (m.domain || '').toLowerCase().includes(searchQuery.toLowerCase())
-    )
+  const handleDeleteAccount = async (userId: string, fullName: string) => {
+    if (!confirm(`Permanently delete ${fullName}'s account from the portal? This cannot be undone.`)) return;
+    setUpdatingId(userId);
+    await supabase.from('sig_memberships').delete().eq('user_id', userId);
+    const result = await deleteUserAccount(userId);
+    if (result.error) {
+      alert('Error deleting account: ' + result.error);
+    } else {
+      setRoster((prev) => prev.filter((r) => r.userId !== userId));
+    }
+    setUpdatingId(null);
+  };
+
+  const handleApproveRequest = async (req: PendingRequest) => {
+    setUpdatingId(req.userId);
+    await supabase
+      .from('sig_memberships')
+      .update({ status: 'APPROVED' })
+      .eq('user_id', req.userId)
+      .eq('sig_id', req.sigId);
+    await fetchAllChairData();
+    setUpdatingId(null);
+  };
+
+  const handleRejectRequest = async (req: PendingRequest) => {
+    setUpdatingId(req.userId);
+    await supabase
+      .from('sig_memberships')
+      .delete()
+      .eq('user_id', req.userId)
+      .eq('sig_id', req.sigId);
+    await fetchAllChairData();
+    setUpdatingId(null);
+  };
+
+  const handleToggleSubtask = async (subtask: Subtask) => {
+    const newVal = !subtask.is_completed;
+    await supabase
+      .from('subtasks')
+      .update({
+        is_completed: newVal,
+        completed_at: newVal ? new Date().toISOString() : null
+      })
+      .eq('id', subtask.id);
+    await fetchAllChairData();
+  };
+
+  const handleExportCSV = () => {
+    const headers = ['Full Name', 'Roll Number', 'Semester', 'Assigned Domain', 'Role', 'Progress'];
+    const rows = roster.map((r) => [
+      r.fullName,
+      r.rollNumber,
+      r.semester || 'N/A',
+      r.sigName || 'Unassigned',
+      r.globalRole === 'CHAIR' ? 'Chair' : r.sigRole,
+      `${r.progressPercent}% (${r.completedSubtasks}/${r.totalSubtasks})`
+    ]);
+    const csvContent =
+      'data:text/csv;charset=utf-8,' +
+      [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', 'acm_chapter_roster.csv');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Filtered Roster
+  const filteredRoster = roster.filter(
+    (r) =>
+      r.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      r.rollNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (r.sigName || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Derived Metrics (Calculated ONLY from active/approved members)
-  const totalMembers = activeMembers.length;
-  const leadCount = members.filter(m => m.global_role === 'LEAD' && m.status !== 'PENDING').length;
-
-  const aiMembers = activeMembers.filter(m => m.domain === 'SIG-AI');
-  const webMembers = activeMembers.filter(m => m.domain === 'SIG-Web Dev');
-  const cyberMembers = activeMembers.filter(m => m.domain === 'SIG-Cyber');
-  const glitchMembers = activeMembers.filter(m => m.domain === 'SIG-Glitch');
+  // Executive Metrics
+  const activeDomainMembers = roster.filter((r) => r.sigId !== null);
+  const totalLeads = roster.filter((r) => r.sigRole === 'LEAD').length;
 
   return (
-    <div className="space-y-6">
-      
-      {/* HEADER & PILL TAB SWITCHER */}
+    <div className="space-y-8">
+      {/* TOP BAR & SWITCHABLE PILL TABS */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-800/80 pb-6">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-white">Executive Suite</h1>
-          <p className="text-xs text-zinc-400 mt-0.5">Club-wide governance, domain operations, and milestone tracking.</p>
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-950/50 border border-blue-800/40 text-xs font-medium text-blue-400 mb-2">
+            <Shield className="h-3.5 w-3.5" />
+            <span>Executive Governance</span>
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-white">Chair Executive Suite</h1>
+          <p className="text-xs text-zinc-400 mt-1">
+            Monitor SIG progress, approve domain requests, and manage chapter roles &amp; succession.
+          </p>
         </div>
 
-        <div className="flex items-center gap-1 bg-[#0c1222]/90 border border-blue-950/80 p-1.5 rounded-xl shadow-md">
+        {/* Pill Tab Switcher */}
+        <div className="flex items-center gap-1 bg-[#0c1222] border border-zinc-800/90 p-1.5 rounded-xl w-fit">
           <button
             onClick={() => setActiveTab('overview')}
             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === 'overview' ? 'bg-blue-600 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50'
+              activeTab === 'overview'
+                ? 'bg-zinc-800 text-white shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            Executive Overview
+            Chapter Overview
           </button>
           <button
             onClick={() => setActiveTab('roster')}
             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === 'roster' ? 'bg-blue-600 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50'
+              activeTab === 'roster'
+                ? 'bg-zinc-800 text-white shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
             Roster &amp; Roles
@@ -115,23 +374,27 @@ export default function ChairDashboard() {
           <button
             onClick={() => setActiveTab('requests')}
             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-              activeTab === 'requests' ? 'bg-blue-600 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50'
+              activeTab === 'requests'
+                ? 'bg-zinc-800 text-white shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
             <span>Requests</span>
             {pendingRequests.length > 0 && (
-              <span className="bg-amber-500 text-amber-950 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+              <span className="bg-amber-500 text-amber-950 text-[10px] px-1.5 py-0.5 rounded-full font-bold">
                 {pendingRequests.length}
               </span>
             )}
           </button>
           <button
-            onClick={() => setActiveTab('sig-details')}
+            onClick={() => setActiveTab('my-tasks')}
             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === 'sig-details' ? 'bg-blue-600 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50'
+              activeTab === 'my-tasks'
+                ? 'bg-zinc-800 text-white shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            SIG Progress
+            My Tasks
           </button>
         </div>
       </div>
@@ -142,71 +405,204 @@ export default function ChairDashboard() {
         </div>
       ) : (
         <>
-          {/* ================= TAB 1: EXECUTIVE OVERVIEW ================= */}
+          {/* ==================== TAB 1: CHAPTER OVERVIEW & DETAILED SIG PROGRESS ==================== */}
           {activeTab === 'overview' && (
-            <div className="space-y-6">
+            <div className="space-y-8">
+              {/* Top Summary Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-5 shadow-lg">
                   <div className="flex items-center gap-3 mb-2">
-                    <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400"><Users className="h-5 w-5" /></div>
-                    <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Total Members</span>
+                    <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
+                      <Users className="h-5 w-5" />
+                    </div>
+                    <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
+                      Total Accounts
+                    </span>
                   </div>
-                  <p className="text-3xl font-bold text-white">{totalMembers}</p>
+                  <p className="text-3xl font-bold text-white">{roster.length}</p>
                 </div>
 
                 <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-5 shadow-lg">
                   <div className="flex items-center gap-3 mb-2">
-                    <div className="p-2 bg-amber-500/10 rounded-lg text-amber-400"><Clock className="h-5 w-5" /></div>
-                    <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Pending Requests</span>
+                    <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400">
+                      <Activity className="h-5 w-5" />
+                    </div>
+                    <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
+                      Enrolled in SIGs
+                    </span>
+                  </div>
+                  <p className="text-3xl font-bold text-white">{activeDomainMembers.length}</p>
+                </div>
+
+                <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-5 shadow-lg">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 bg-green-500/10 rounded-lg text-green-400">
+                      <ShieldCheck className="h-5 w-5" />
+                    </div>
+                    <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
+                      SIG Leads
+                    </span>
+                  </div>
+                  <p className="text-3xl font-bold text-white">{totalLeads}</p>
+                </div>
+
+                <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-5 shadow-lg">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 bg-amber-500/10 rounded-lg text-amber-400">
+                      <Clock className="h-5 w-5" />
+                    </div>
+                    <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
+                      Pending Approvals
+                    </span>
                   </div>
                   <p className="text-3xl font-bold text-white">{pendingRequests.length}</p>
                 </div>
-
-                <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-5 shadow-lg">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="p-2 bg-green-500/10 rounded-lg text-green-400"><ShieldCheck className="h-5 w-5" /></div>
-                    <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Domain Leads</span>
-                  </div>
-                  <p className="text-3xl font-bold text-white">{leadCount}</p>
-                </div>
-
-                <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-5 shadow-lg">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400"><Activity className="h-5 w-5" /></div>
-                    <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Chapter Status</span>
-                  </div>
-                  <p className="text-2xl font-bold text-green-400 mt-1">Operational</p>
-                </div>
               </div>
 
-              {/* SIG Health Distribution */}
-              <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-6 shadow-lg">
-                <h3 className="text-sm font-semibold text-zinc-200 mb-5">SIG Distribution &amp; Workload Health</h3>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                  <SigHealthCard label="SIG-AI" count={aiMembers.length} total={totalMembers} color="bg-blue-500" />
-                  <SigHealthCard label="SIG-Web Dev" count={webMembers.length} total={totalMembers} color="bg-indigo-500" />
-                  <SigHealthCard label="SIG-Cyber" count={cyberMembers.length} total={totalMembers} color="bg-emerald-500" />
-                  <SigHealthCard label="SIG-Glitch" count={glitchMembers.length} total={totalMembers} color="bg-amber-500" />
+              {/* Detailed SIG Progress Cards (Expandable per SIG to see each member's progress) */}
+              <div className="space-y-4">
+                <h2 className="text-lg font-semibold text-white">
+                  SIG Domains &amp; Detailed Member Progress
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {sigs.map((sig) => {
+                    const sigMembers = roster.filter((r) => r.sigId === sig.id);
+                    const sigLeads = sigMembers.filter((r) => r.sigRole === 'LEAD');
+                    const totalSigSt = sigMembers.reduce((acc, m) => acc + m.totalSubtasks, 0);
+                    const compSigSt = sigMembers.reduce((acc, m) => acc + m.completedSubtasks, 0);
+                    const sigPct = totalSigSt > 0 ? Math.round((compSigSt / totalSigSt) * 100) : 0;
+                    const isExpanded = expandedSigId === sig.id;
+
+                    return (
+                      <div
+                        key={sig.id}
+                        className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-6 shadow-lg flex flex-col justify-between space-y-5"
+                      >
+                        <div>
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <h3 className="text-base font-bold text-white">{sig.name}</h3>
+                              <p className="text-xs text-zinc-400 mt-1">{sig.description}</p>
+                            </div>
+                            <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                              {sigMembers.length} Members
+                            </span>
+                          </div>
+
+                          <div className="mt-4 flex items-center gap-2 text-xs text-zinc-400">
+                            <span className="font-medium text-zinc-300">Domain Lead:</span>
+                            <span>
+                              {sigLeads.length > 0
+                                ? sigLeads.map((l) => l.fullName).join(', ')
+                                : 'Unassigned'}
+                            </span>
+                          </div>
+
+                          {/* Overall SIG Progress Bar */}
+                          <div className="mt-4">
+                            <div className="flex justify-between text-xs mb-1.5">
+                              <span className="text-zinc-400">Overall Domain Completion</span>
+                              <span className="text-blue-400 font-semibold">
+                                {sigPct}% ({compSigSt}/{totalSigSt} subtasks)
+                              </span>
+                            </div>
+                            <div className="h-2 w-full bg-zinc-800/90 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                                style={{ width: `${sigPct}%` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Toggle Detailed Member Breakdown */}
+                        <div className="pt-3 border-t border-blue-950/60">
+                          <button
+                            onClick={() => setExpandedSigId(isExpanded ? null : sig.id)}
+                            className="w-full flex items-center justify-between text-xs font-medium text-zinc-300 hover:text-white transition-colors"
+                          >
+                            <span>
+                              {isExpanded ? 'Hide Detailed Member Progress' : 'View Detailed Member Progress'}
+                            </span>
+                            {isExpanded ? (
+                              <ChevronUp className="h-4 w-4 text-zinc-400" />
+                            ) : (
+                              <ChevronDown className="h-4 w-4 text-zinc-400" />
+                            )}
+                          </button>
+
+                          {isExpanded && (
+                            <div className="mt-4 space-y-3 divide-y divide-blue-950/40">
+                              {sigMembers.length === 0 ? (
+                                <p className="text-xs text-zinc-500 py-2">
+                                  No approved members in {sig.name} yet.
+                                </p>
+                              ) : (
+                                sigMembers.map((m) => (
+                                  <div key={m.userId} className="pt-3 flex items-center justify-between gap-4">
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-xs font-medium text-zinc-200">
+                                          {m.fullName}
+                                        </span>
+                                        {m.sigRole === 'LEAD' && (
+                                          <span className="px-1.5 py-0.5 rounded bg-blue-600/20 border border-blue-500/30 text-[10px] font-medium text-blue-400">
+                                            Lead
+                                          </span>
+                                        )}
+                                      </div>
+                                      <span className="text-[11px] text-zinc-500 uppercase">
+                                        {m.rollNumber} • Sem {m.semester}
+                                      </span>
+                                    </div>
+
+                                    <div className="w-36">
+                                      <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden mb-1">
+                                        <div
+                                          className="h-full bg-zinc-200 rounded-full"
+                                          style={{ width: `${m.progressPercent}%` }}
+                                        />
+                                      </div>
+                                      <span className="text-[10px] text-zinc-400 block text-right">
+                                        {m.progressPercent}% ({m.completedSubtasks}/{m.totalSubtasks})
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
           )}
 
-          {/* ================= TAB 2: MASTER ROSTER & ROLES ================= */}
+          {/* ==================== TAB 2: MASTER ROSTER & ROLES ==================== */}
           {activeTab === 'roster' && (
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <h2 className="text-base font-semibold text-white">Master Chapter Roster (First-Come, First-Placed)</h2>
-                <div className="relative w-full sm:w-80">
+                <div className="relative w-full max-w-md">
                   <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
                   <input
                     type="text"
-                    placeholder="Search member, roll number, domain..."
+                    placeholder="Search member, roll number, domain"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 bg-[#0c1222]/80 border border-blue-950/70 rounded-lg text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-blue-800 transition-colors"
+                    className="w-full pl-10 pr-4 py-2.5 bg-[#0c1222]/80 border border-blue-950/70 rounded-lg text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-blue-800 transition-colors"
                   />
                 </div>
+
+                <button
+                  onClick={handleExportCSV}
+                  className="px-4 py-2 bg-[#0c1222] hover:bg-zinc-900 border border-blue-950/80 rounded-lg text-xs font-medium text-zinc-300 flex items-center gap-2 w-fit transition-colors"
+                >
+                  <Download className="h-4 w-4 text-blue-400" />
+                  <span>Export CSV</span>
+                </button>
               </div>
 
               <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl overflow-hidden shadow-lg shadow-black/20">
@@ -223,14 +619,125 @@ export default function ChairDashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-blue-950/40">
-                      {filteredActiveRoster.length === 0 ? (
+                      {filteredRoster.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="px-6 py-12 text-center text-zinc-500">No active members found.</td>
+                          <td colSpan={6} className="px-6 py-12 text-center text-zinc-500">
+                            No members found matching your search.
+                          </td>
                         </tr>
                       ) : (
-                        filteredActiveRoster.map((member) => (
-                          <MemberRow key={member.id} member={member} onDeleted={handleRemoveFromState} />
-                        ))
+                        filteredRoster.map((member) => {
+                          const isBusy = updatingId === member.userId;
+                          const isChair = member.globalRole === 'CHAIR';
+
+                          return (
+                            <tr key={member.userId} className="hover:bg-blue-950/10 transition-colors">
+                              {/* 1. Member Info */}
+                              <td className="px-6 py-4">
+                                <div className="flex flex-col gap-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium text-zinc-200">
+                                      {member.fullName}
+                                    </span>
+                                    {isChair && (
+                                      <span className="px-1.5 py-0.5 rounded bg-blue-600/20 border border-blue-500/30 text-[10px] font-medium text-blue-400">
+                                        Chair
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-xs text-zinc-500 uppercase tracking-wide">
+                                    {member.rollNumber}
+                                  </span>
+                                </div>
+                              </td>
+
+                              {/* 2. Semester */}
+                              <td className="px-6 py-4 text-zinc-400">{member.semester}</td>
+
+                              {/* 3. Assigned Domain (Stored in sig_memberships) */}
+                              <td className="px-6 py-4">
+                                <select
+                                  disabled={isBusy}
+                                  value={member.sigId || ''}
+                                  onChange={(e) => handleAssignDomain(member.userId, e.target.value)}
+                                  className="bg-[#070b14] border border-blue-950/70 rounded-md px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-blue-700 disabled:opacity-50 transition-colors"
+                                >
+                                  <option value="">Select Domain</option>
+                                  {sigs.map((s) => (
+                                    <option key={s.id} value={s.id}>
+                                      {s.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </td>
+
+                              {/* 4. SIG Role ('MEMBER' or 'LEAD' in sig_memberships) */}
+                              <td className="px-6 py-4">
+                                <select
+                                  disabled={isBusy || !member.sigId}
+                                  value={member.sigRole}
+                                  onChange={(e) =>
+                                    handleSigRoleChange(member.userId, member.sigId, e.target.value)
+                                  }
+                                  className="bg-[#070b14] border border-blue-950/70 rounded-md px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-blue-700 disabled:opacity-50 transition-colors"
+                                >
+                                  <option value="MEMBER">Member</option>
+                                  <option value="LEAD">Lead</option>
+                                </select>
+                              </td>
+
+                              {/* 5. Subtask Progress */}
+                              <td className="px-6 py-4">
+                                <div className="w-32">
+                                  <div className="h-1.5 w-full bg-zinc-800/80 rounded-full overflow-hidden mb-1.5">
+                                    <div
+                                      className="h-full bg-zinc-200 rounded-full"
+                                      style={{ width: `${member.progressPercent}%` }}
+                                    />
+                                  </div>
+                                  <span className="text-[11px] text-zinc-500">
+                                    {member.progressPercent}% ({member.completedSubtasks}/
+                                    {member.totalSubtasks})
+                                  </span>
+                                </div>
+                              </td>
+
+                              {/* 6. Actions: Remove from Domain + Delete Account */}
+                              <td className="px-6 py-4 text-right">
+                                {!isChair && (
+                                  <div className="flex items-center justify-end gap-2">
+                                    {member.sigId && (
+                                      <button
+                                        onClick={() =>
+                                          handleRemoveFromDomain(member.userId, member.fullName)
+                                        }
+                                        disabled={isBusy}
+                                        className="p-1.5 text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10 rounded-md transition-colors"
+                                        title="Remove from Domain"
+                                      >
+                                        <UserMinus className="h-4 w-4" />
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() =>
+                                        handleDeleteAccount(member.userId, member.fullName)
+                                      }
+                                      disabled={isBusy}
+                                      className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-md transition-colors"
+                                      title="Permanently Delete Account"
+                                    >
+                                      {isBusy ? (
+                                        <Loader2 className="h-4 w-4 animate-spin text-red-400" />
+                                      ) : (
+                                        <Trash2 className="h-4 w-4" />
+                                      )}
+                                    </button>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
@@ -239,17 +746,55 @@ export default function ChairDashboard() {
             </div>
           )}
 
-          {/* ================= TAB 3: PENDING REQUESTS ================= */}
+          {/* ==================== TAB 3: GLOBAL REQUEST QUEUE ==================== */}
           {activeTab === 'requests' && (
             <div className="space-y-4">
-              <h2 className="text-base font-semibold text-white">Domain Join Requests (Pending Approval)</h2>
+              <h2 className="text-base font-semibold text-white">
+                Pending Domain Enrollment Requests
+              </h2>
               <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl overflow-hidden shadow-lg">
                 {pendingRequests.length === 0 ? (
-                  <div className="p-12 text-center text-zinc-500 text-sm">No pending domain requests. All clear!</div>
+                  <div className="p-12 text-center text-zinc-500 text-sm">
+                    No pending domain requests right now.
+                  </div>
                 ) : (
                   <div className="divide-y divide-blue-950/40">
                     {pendingRequests.map((req) => (
-                      <PendingRequestRow key={req.id} member={req} onUpdated={handleUpdateMemberState} />
+                      <div
+                        key={`${req.userId}-${req.sigId}`}
+                        className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                      >
+                        <div>
+                          <p className="font-medium text-zinc-200 text-sm">{req.fullName}</p>
+                          <p className="text-xs text-zinc-500 uppercase mt-0.5">
+                            {req.rollNumber} • Sem {req.semester} • Requesting{' '}
+                            <span className="text-amber-400 font-semibold">{req.sigName}</span>
+                          </p>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleRejectRequest(req)}
+                            disabled={updatingId === req.userId}
+                            className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs rounded-lg transition-colors flex items-center gap-1"
+                          >
+                            <X className="h-3.5 w-3.5 text-red-400" />
+                            <span>Reject</span>
+                          </button>
+                          <button
+                            onClick={() => handleApproveRequest(req)}
+                            disabled={updatingId === req.userId}
+                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1"
+                          >
+                            {updatingId === req.userId ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Check className="h-3.5 w-3.5" />
+                            )}
+                            <span>Approve</span>
+                          </button>
+                        </div>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -257,286 +802,51 @@ export default function ChairDashboard() {
             </div>
           )}
 
-          {/* ================= TAB 4: DETAILED SIG OVERVIEW ================= */}
-          {activeTab === 'sig-details' && (
-            <div className="space-y-6">
-              <div className="flex gap-2 border-b border-zinc-800 pb-4">
-                {(['SIG-AI', 'SIG-Web Dev', 'SIG-Cyber', 'SIG-Glitch'] as const).map((sig) => (
-                  <button
-                    key={sig}
-                    onClick={() => setSelectedSigTab(sig)}
-                    className={`px-4 py-2 rounded-lg text-xs font-medium transition-colors ${
-                      selectedSigTab === sig
-                        ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
-                        : 'bg-[#0c1222] text-zinc-400 hover:text-zinc-200 border border-zinc-800'
-                    }`}
-                  >
-                    {sig} ({activeMembers.filter(m => m.domain === sig).length})
-                  </button>
-                ))}
-              </div>
-
-              <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl overflow-hidden shadow-lg">
-                <div className="p-5 border-b border-blue-950/70 flex items-center justify-between">
-                  <div>
-                    <h3 className="font-semibold text-white text-base">{selectedSigTab} Roster &amp; Member Progress</h3>
-                    <p className="text-xs text-zinc-400 mt-0.5">Detailed task completion and milestone tracking for assigned members.</p>
-                  </div>
-                  <span className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 px-3 py-1 rounded-full font-medium">
-                    {activeMembers.filter(m => m.domain === selectedSigTab).length} Active Members
-                  </span>
+          {/* ==================== TAB 4: PERSONAL TASKS ==================== */}
+          {activeTab === 'my-tasks' && (
+            <div className="space-y-4">
+              <h2 className="text-base font-semibold text-white">My Assigned Tasks</h2>
+              {myTasks.length === 0 ? (
+                <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-12 text-center text-zinc-500 text-sm">
+                  You have no personal tasks assigned.
                 </div>
-
-                <div className="divide-y divide-blue-950/40">
-                  {activeMembers.filter(m => m.domain === selectedSigTab).length === 0 ? (
-                    <div className="p-12 text-center text-zinc-500 text-sm">No members currently enrolled in {selectedSigTab}.</div>
-                  ) : (
-                    activeMembers
-                      .filter(m => m.domain === selectedSigTab)
-                      .map((m) => (
-                        <div key={m.id} className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-blue-950/10 transition-colors">
-                          <div className="flex items-center gap-3">
-                            <div className="h-10 w-10 rounded-xl bg-blue-600/10 border border-blue-500/20 flex items-center justify-center text-blue-400 font-semibold text-sm">
-                              {m.full_name ? m.full_name.substring(0, 2).toUpperCase() : 'U'}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium text-zinc-200 text-sm">{m.full_name || 'Unknown'}</span>
-                                {m.global_role === 'LEAD' && (
-                                  <span className="px-1.5 py-0.2 rounded bg-green-500/20 text-green-400 text-[10px] font-bold">LEAD</span>
-                                )}
-                              </div>
-                              <span className="text-xs text-zinc-500 uppercase tracking-wide">{m.roll_number}</span>
-                            </div>
-                          </div>
-
-                          <div className="w-full sm:w-64">
-                            <div className="flex justify-between text-xs mb-1.5">
-                              <span className="text-zinc-400">Milestone Progress</span>
-                              <span className="text-blue-400 font-medium">0% (0 tasks)</span>
-                            </div>
-                            <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
-                              <div className="h-full bg-blue-500 rounded-full" style={{ width: '0%' }} />
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                  )}
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {myTasks.map((task) => (
+                    <div
+                      key={task.id}
+                      className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-5 space-y-4"
+                    >
+                      <div>
+                        <h3 className="font-semibold text-white text-sm">{task.title}</h3>
+                        <p className="text-xs text-zinc-400 mt-1">{task.description}</p>
+                      </div>
+                      <div className="space-y-2">
+                        {task.subtasks.map((st) => (
+                          <button
+                            key={st.id}
+                            onClick={() => handleToggleSubtask(st)}
+                            className="w-full flex items-center gap-2.5 text-left text-xs text-zinc-300 hover:text-white py-1"
+                          >
+                            {st.is_completed ? (
+                              <CheckSquare className="h-4 w-4 text-blue-500 shrink-0" />
+                            ) : (
+                              <Square className="h-4 w-4 text-zinc-600 shrink-0" />
+                            )}
+                            <span className={st.is_completed ? 'line-through text-zinc-500' : ''}>
+                              {st.title}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
+              )}
             </div>
           )}
         </>
       )}
     </div>
-  );
-}
-
-// ------------------------------------------------------------------
-// Sub-components
-// ------------------------------------------------------------------
-function SigHealthCard({ label, count, total, color }: { label: string, count: number, total: number, color: string }) {
-  const percent = total > 0 ? Math.round((count / total) * 100) : 0;
-  return (
-    <div>
-      <div className="flex justify-between text-xs mb-1.5">
-        <span className="text-zinc-300 font-medium">{label}</span>
-        <span className="text-zinc-500">{count} members</span>
-      </div>
-      <div className="h-2 w-full bg-zinc-800/80 rounded-full overflow-hidden">
-        <div className={`h-full ${color} rounded-full transition-all duration-500`} style={{ width: `${percent}%` }} />
-      </div>
-    </div>
-  );
-}
-
-function PendingRequestRow({ member, onUpdated }: { member: Profile, onUpdated: (id: string, updates: Partial<Profile>) => void }) {
-  const supabase = createClient();
-  const [processing, setProcessing] = useState(false);
-
-  const handleApprove = async () => {
-    setProcessing(true);
-    const { error } = await supabase.from('profiles').update({ status: 'APPROVED' }).eq('id', member.id);
-    if (error) {
-      alert('Error approving request: ' + error.message);
-    } else {
-      onUpdated(member.id, { status: 'APPROVED' });
-    }
-    setProcessing(false);
-  };
-
-  const handleReject = async () => {
-    setProcessing(true);
-    const { error } = await supabase.from('profiles').update({ status: 'APPROVED', domain: null }).eq('id', member.id);
-    if (error) {
-      alert('Error rejecting request: ' + error.message);
-    } else {
-      onUpdated(member.id, { status: 'APPROVED', domain: null });
-    }
-    setProcessing(false);
-  };
-
-  return (
-    <div className="p-5 flex items-center justify-between gap-4">
-      <div>
-        <p className="font-medium text-zinc-200 text-sm">{member.full_name}</p>
-        <p className="text-xs text-zinc-500 uppercase">{member.roll_number} • Requesting <span className="text-amber-400 font-medium">{member.domain}</span></p>
-      </div>
-      <div className="flex items-center gap-2">
-        <button
-          onClick={handleReject}
-          disabled={processing}
-          className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs rounded-lg transition-colors flex items-center gap-1"
-        >
-          <X className="h-3.5 w-3.5 text-red-400" />
-          <span>Reject</span>
-        </button>
-        <button
-          onClick={handleApprove}
-          disabled={processing}
-          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1"
-        >
-          {processing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
-          <span>Approve Request</span>
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function MemberRow({ member, onDeleted }: { member: Profile, onDeleted: (id: string) => void }) {
-  const supabase = createClient();
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [isUpdating, setIsUpdating] = useState(false);
-  
-  const [domain, setDomain] = useState(member.domain || '');
-  const [role, setRole] = useState(member.global_role || 'MEMBER');
-
-  const handleDelete = async () => {
-    if (!confirm(`Are you sure you want to permanently delete ${member.full_name}'s account?`)) return;
-    setIsDeleting(true);
-    const result = await deleteUserAccount(member.id);
-    if (result.error) {
-      alert('Error: ' + result.error);
-      setIsDeleting(false);
-    } else {
-      onDeleted(member.id);
-    }
-  };
-
-  const handleDomainChange = async (newDomain: string) => {
-    setIsUpdating(true);
-    const previousDomain = domain;
-    setDomain(newDomain);
-
-    const { error } = await supabase
-      .from('profiles')
-      .update({ domain: newDomain === '' ? null : newDomain, status: 'APPROVED' })
-      .eq('id', member.id);
-
-    if (error) {
-      alert('Failed to update domain: ' + error.message);
-      setDomain(previousDomain);
-    }
-    setIsUpdating(false);
-  };
-
-  const handleRoleChange = async (newRole: string) => {
-    setIsUpdating(true);
-    const previousRole = role;
-    setRole(newRole);
-
-    const { error } = await supabase
-      .from('profiles')
-      .update({ global_role: newRole })
-      .eq('id', member.id);
-
-    if (error) {
-      alert('Failed to update role: ' + error.message);
-      setRole(previousRole);
-    }
-    setIsUpdating(false);
-  };
-
-  return (
-    <tr className="hover:bg-blue-950/10 transition-colors">
-      <td className="px-6 py-4">
-        <div className="flex flex-col gap-1">
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-zinc-200">{member.full_name || 'Unknown User'}</span>
-            {role === 'CHAIR' && (
-              <span className="px-1.5 py-0.5 rounded bg-blue-600/20 border border-blue-500/30 text-[10px] font-medium text-blue-400">Chair</span>
-            )}
-          </div>
-          <span className="text-xs text-zinc-500 uppercase tracking-wide">{member.roll_number || 'N/A'}</span>
-        </div>
-      </td>
-      
-      <td className="px-6 py-4 text-zinc-400">{member.semester || 'N/A'}</td>
-      
-      <td className="px-6 py-4">
-        {role === 'CHAIR' ? (
-          <span className="text-xs text-zinc-500 font-mono">Executive Authority</span>
-        ) : (
-          <select
-            disabled={isUpdating}
-            value={domain}
-            onChange={(e) => handleDomainChange(e.target.value)}
-            className="bg-[#070b14] border border-blue-950/70 rounded-md px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-blue-700 disabled:opacity-50 transition-colors"
-          >
-            <option value="">Select Domain</option>
-            <option value="SIG-AI">SIG-AI</option>
-            <option value="SIG-Web Dev">SIG-Web Dev</option>
-            <option value="SIG-Cyber">SIG-Cyber</option>
-            <option value="SIG-Glitch">SIG-Glitch</option>
-          </select>
-        )}
-      </td>
-      
-      <td className="px-6 py-4">
-        <select
-          disabled={isUpdating || role === 'CHAIR'}
-          value={role}
-          onChange={(e) => handleRoleChange(e.target.value)}
-          className="bg-[#070b14] border border-blue-950/70 rounded-md px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-blue-700 disabled:opacity-50 transition-colors"
-        >
-          <option value="MEMBER">Member</option>
-          <option value="LEAD">Lead</option>
-          <option value="CHAIR">Chair</option>
-        </select>
-      </td>
-      
-      <td className="px-6 py-4">
-        {role === 'CHAIR' ? (
-          <span className="text-[11px] text-zinc-600 font-mono">N/A</span>
-        ) : (
-          <div className="w-32">
-            <div className="h-1.5 w-full bg-zinc-800/80 rounded-full overflow-hidden mb-1.5">
-              <div className="h-full bg-blue-500 rounded-full" style={{ width: '0%' }} />
-            </div>
-            <span className="text-[11px] text-zinc-500">0% (0/0)</span>
-          </div>
-        )}
-      </td>
-      
-      <td className="px-6 py-4 text-right">
-        {role !== 'CHAIR' ? (
-          <button
-            onClick={handleDelete}
-            disabled={isDeleting}
-            className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors inline-flex items-center justify-center disabled:opacity-50"
-            title="Permanently Delete Account"
-          >
-            {isDeleting ? (
-              <Loader2 className="h-4 w-4 animate-spin text-red-400" />
-            ) : (
-              <Trash2 className="h-4 w-4" />
-            )}
-          </button>
-        ) : (
-          <span className="text-[10px] text-zinc-600 font-mono pr-2">PROTECTED</span>
-        )}
-      </td>
-    </tr>
   );
 }
