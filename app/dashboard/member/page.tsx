@@ -60,7 +60,6 @@ export default function MemberDashboard() {
   const [requestingSigId, setRequestingSigId] = useState<string | null>(null);
   const [togglingSubtaskId, setTogglingSubtaskId] = useState<string | null>(null);
   
-  // Modal state for enrolling
   const [showDomainModal, setShowDomainModal] = useState(false);
 
   useEffect(() => {
@@ -178,6 +177,7 @@ export default function MemberDashboard() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* UPDATED SEMESTER OPTIONS */}
           <select
             value={selectedSemester}
             onChange={(e) => setSelectedSemester(Number(e.target.value))}
@@ -187,6 +187,10 @@ export default function MemberDashboard() {
             <option value={2}>Sem 2</option>
             <option value={3}>Sem 3</option>
             <option value={4}>Sem 4</option>
+            <option value={5}>Sem 5</option>
+            <option value={6}>Sem 6</option>
+            <option value={7}>Sem 7</option>
+            <option value={8}>Sem 8</option>
           </select>
           <button
             onClick={() => setShowDomainModal(true)}
@@ -222,7 +226,7 @@ export default function MemberDashboard() {
         </div>
       </div>
 
-      {/* DELIVERABLES (Full width now) */}
+      {/* DELIVERABLES */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-white">Assigned Deliverables</h2>
