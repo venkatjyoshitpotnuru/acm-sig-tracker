@@ -12,9 +12,7 @@ import {
   Trash2, 
   Loader2, 
   Check, 
-  X, 
-  Layers,
-  BarChart2
+  X 
 } from 'lucide-react';
 
 interface Profile {
@@ -34,7 +32,7 @@ export default function ChairDashboard() {
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Tab switcher state: 'overview' | 'roster' | 'requests' | 'sig-details'
+  // Tab switcher state
   const [activeTab, setActiveTab] = useState<'overview' | 'roster' | 'requests' | 'sig-details'>('overview');
   const [selectedSigTab, setSelectedSigTab] = useState<'SIG-AI' | 'SIG-Web Dev' | 'SIG-Cyber' | 'SIG-Glitch'>('SIG-AI');
 
@@ -65,22 +63,27 @@ export default function ChairDashboard() {
     setMembers((prev) => prev.map(m => m.id === id ? { ...m, ...updates } : m));
   };
 
-  // Filtered members for search
-  const filteredMembers = members.filter((m) => 
-    (m.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (m.roll_number || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    (m.domain || '').toLowerCase().includes(searchQuery.toLowerCase())
+  // Separate Pending Requests from Active Roster Members
+  const pendingRequests = members.filter(m => m.status === 'PENDING');
+  const activeMembers = members.filter(m => m.status !== 'PENDING' && m.global_role !== 'CHAIR');
+
+  // Filtered members for the Roster search bar
+  const filteredActiveRoster = members.filter((m) => 
+    m.status !== 'PENDING' && (
+      (m.full_name || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (m.roll_number || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (m.domain || '').toLowerCase().includes(searchQuery.toLowerCase())
+    )
   );
 
-  // Derived Metrics
-  const totalMembers = members.filter(m => m.global_role !== 'CHAIR').length;
-  const pendingRequests = members.filter(m => m.status === 'PENDING');
-  const leadCount = members.filter(m => m.global_role === 'LEAD').length;
+  // Derived Metrics (Calculated ONLY from active/approved members)
+  const totalMembers = activeMembers.length;
+  const leadCount = members.filter(m => m.global_role === 'LEAD' && m.status !== 'PENDING').length;
 
-  const aiMembers = members.filter(m => m.domain === 'SIG-AI' && m.status !== 'PENDING');
-  const webMembers = members.filter(m => m.domain === 'SIG-Web Dev' && m.status !== 'PENDING');
-  const cyberMembers = members.filter(m => m.domain === 'SIG-Cyber' && m.status !== 'PENDING');
-  const glitchMembers = members.filter(m => m.domain === 'SIG-Glitch' && m.status !== 'PENDING');
+  const aiMembers = activeMembers.filter(m => m.domain === 'SIG-AI');
+  const webMembers = activeMembers.filter(m => m.domain === 'SIG-Web Dev');
+  const cyberMembers = activeMembers.filter(m => m.domain === 'SIG-Cyber');
+  const glitchMembers = activeMembers.filter(m => m.domain === 'SIG-Glitch');
 
   return (
     <div className="space-y-6">
@@ -92,14 +95,11 @@ export default function ChairDashboard() {
           <p className="text-xs text-zinc-400 mt-0.5">Club-wide governance, domain operations, and milestone tracking.</p>
         </div>
 
-        {/* Switchable Options Bar */}
         <div className="flex items-center gap-1 bg-[#0c1222]/90 border border-blue-950/80 p-1.5 rounded-xl shadow-md">
           <button
             onClick={() => setActiveTab('overview')}
             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === 'overview' 
-                ? 'bg-blue-600 text-white shadow-sm' 
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50'
+              activeTab === 'overview' ? 'bg-blue-600 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50'
             }`}
           >
             Executive Overview
@@ -107,9 +107,7 @@ export default function ChairDashboard() {
           <button
             onClick={() => setActiveTab('roster')}
             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === 'roster' 
-                ? 'bg-blue-600 text-white shadow-sm' 
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50'
+              activeTab === 'roster' ? 'bg-blue-600 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50'
             }`}
           >
             Roster &amp; Roles
@@ -117,9 +115,7 @@ export default function ChairDashboard() {
           <button
             onClick={() => setActiveTab('requests')}
             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
-              activeTab === 'requests' 
-                ? 'bg-blue-600 text-white shadow-sm' 
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50'
+              activeTab === 'requests' ? 'bg-blue-600 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50'
             }`}
           >
             <span>Requests</span>
@@ -132,9 +128,7 @@ export default function ChairDashboard() {
           <button
             onClick={() => setActiveTab('sig-details')}
             className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
-              activeTab === 'sig-details' 
-                ? 'bg-blue-600 text-white shadow-sm' 
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50'
+              activeTab === 'sig-details' ? 'bg-blue-600 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/50'
             }`}
           >
             SIG Progress
@@ -229,12 +223,12 @@ export default function ChairDashboard() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-blue-950/40">
-                      {filteredMembers.length === 0 ? (
+                      {filteredActiveRoster.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="px-6 py-12 text-center text-zinc-500">No members found.</td>
+                          <td colSpan={6} className="px-6 py-12 text-center text-zinc-500">No active members found.</td>
                         </tr>
                       ) : (
-                        filteredMembers.map((member) => (
+                        filteredActiveRoster.map((member) => (
                           <MemberRow key={member.id} member={member} onDeleted={handleRemoveFromState} />
                         ))
                       )}
@@ -248,7 +242,7 @@ export default function ChairDashboard() {
           {/* ================= TAB 3: PENDING REQUESTS ================= */}
           {activeTab === 'requests' && (
             <div className="space-y-4">
-              <h2 className="text-base font-semibold text-white">Domain Join Requests</h2>
+              <h2 className="text-base font-semibold text-white">Domain Join Requests (Pending Approval)</h2>
               <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl overflow-hidden shadow-lg">
                 {pendingRequests.length === 0 ? (
                   <div className="p-12 text-center text-zinc-500 text-sm">No pending domain requests. All clear!</div>
@@ -266,7 +260,6 @@ export default function ChairDashboard() {
           {/* ================= TAB 4: DETAILED SIG OVERVIEW ================= */}
           {activeTab === 'sig-details' && (
             <div className="space-y-6">
-              {/* SIG Sub-tabs */}
               <div className="flex gap-2 border-b border-zinc-800 pb-4">
                 {(['SIG-AI', 'SIG-Web Dev', 'SIG-Cyber', 'SIG-Glitch'] as const).map((sig) => (
                   <button
@@ -278,12 +271,11 @@ export default function ChairDashboard() {
                         : 'bg-[#0c1222] text-zinc-400 hover:text-zinc-200 border border-zinc-800'
                     }`}
                   >
-                    {sig} ({members.filter(m => m.domain === sig && m.status !== 'PENDING').length})
+                    {sig} ({activeMembers.filter(m => m.domain === sig).length})
                   </button>
                 ))}
               </div>
 
-              {/* SIG Member Detailed Progress List */}
               <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl overflow-hidden shadow-lg">
                 <div className="p-5 border-b border-blue-950/70 flex items-center justify-between">
                   <div>
@@ -291,16 +283,16 @@ export default function ChairDashboard() {
                     <p className="text-xs text-zinc-400 mt-0.5">Detailed task completion and milestone tracking for assigned members.</p>
                   </div>
                   <span className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 px-3 py-1 rounded-full font-medium">
-                    {members.filter(m => m.domain === selectedSigTab && m.status !== 'PENDING').length} Active Members
+                    {activeMembers.filter(m => m.domain === selectedSigTab).length} Active Members
                   </span>
                 </div>
 
                 <div className="divide-y divide-blue-950/40">
-                  {members.filter(m => m.domain === selectedSigTab && m.status !== 'PENDING').length === 0 ? (
+                  {activeMembers.filter(m => m.domain === selectedSigTab).length === 0 ? (
                     <div className="p-12 text-center text-zinc-500 text-sm">No members currently enrolled in {selectedSigTab}.</div>
                   ) : (
-                    members
-                      .filter(m => m.domain === selectedSigTab && m.status !== 'PENDING')
+                    activeMembers
+                      .filter(m => m.domain === selectedSigTab)
                       .map((m) => (
                         <div key={m.id} className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-blue-950/10 transition-colors">
                           <div className="flex items-center gap-3">
@@ -364,6 +356,7 @@ function PendingRequestRow({ member, onUpdated }: { member: Profile, onUpdated: 
 
   const handleApprove = async () => {
     setProcessing(true);
+    // Approving sets status to APPROVED so they appear in the active roster
     await supabase.from('profiles').update({ status: 'APPROVED' }).eq('id', member.id);
     onUpdated(member.id, { status: 'APPROVED' });
     setProcessing(false);
@@ -371,8 +364,9 @@ function PendingRequestRow({ member, onUpdated }: { member: Profile, onUpdated: 
 
   const handleReject = async () => {
     setProcessing(true);
-    await supabase.from('profiles').update({ status: null, domain: null }).eq('id', member.id);
-    onUpdated(member.id, { status: null, domain: null });
+    // Rejecting clears their domain request and resets status
+    await supabase.from('profiles').update({ status: 'APPROVED', domain: null }).eq('id', member.id);
+    onUpdated(member.id, { status: 'APPROVED', domain: null });
     setProcessing(false);
   };
 
