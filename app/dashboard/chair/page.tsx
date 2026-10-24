@@ -1,27 +1,23 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { deleteUserAccount } from '@/app/actions/admin';
+import { deleteUserAccount, transferChairAuthority } from '@/app/actions/admin';
 import {
   ShieldCheck,
-  Layers,
-  CheckCircle2,
-  Calendar,
-  UserCog,
   Search,
   Clock,
   Check,
   X,
   UserMinus,
   Trash2,
-  ChevronDown,
-  ChevronUp,
   Download,
   Loader2,
   Users,
-  Activity
+  Activity,
+  Crown,
+  AlertTriangle
 } from 'lucide-react';
 
 interface Subtask {
@@ -74,7 +70,7 @@ interface ChapterMember {
 }
 
 interface DomainRequest {
-  id: string; // sig_membership id or composite
+  id: string;
   userId: string;
   fullName: string;
   rollNumber: string;
@@ -89,9 +85,9 @@ export default function ChairDashboard() {
   const supabase = createClient();
 
   const [loading, setLoading] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'roster' | 'requests' | 'sig-details'>('overview');
   const [selectedSigTab, setSelectedSigTab] = useState<string>('SIG-AI');
-  const [expandedSigId, setExpandedSigId] = useState<string | null>(null);
 
   const [sigs, setSigs] = useState<SigItem[]>([]);
   const [sigStats, setSigStats] = useState<SigStat[]>([]);
@@ -100,12 +96,24 @@ export default function ChairDashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
+  // Succession Modal State
+  const [successorCandidate, setSuccessorCandidate] = useState<ChapterMember | null>(null);
+  const [successionConfirmText, setSuccessionConfirmText] = useState('');
+  const [transferringSuccession, setTransferringSuccession] = useState(false);
+
   useEffect(() => {
     fetchChairDashboardData();
   }, []);
 
   const fetchChairDashboardData = async () => {
     setLoading(true);
+
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      router.push('/login');
+      return;
+    }
+    setCurrentUserId(session.user.id);
 
     const [
       { data: sigsData },
@@ -129,13 +137,11 @@ export default function ChairDashboard() {
 
     setSigs(sigList);
 
-    // Group tasks with subtasks
     const tasksWithSubtasks: TaskItem[] = taskList.map((t: any) => ({
       ...t,
       subtasks: subList.filter((st) => st.task_id === t.id)
     }));
 
-    // Build Pending Requests Queue
     const pendingList: DomainRequest[] = [];
     memList
       .filter((m: any) => m.status === 'PENDING')
@@ -157,14 +163,12 @@ export default function ChairDashboard() {
       });
     setRequests(pendingList);
 
-    // Build Chronological Roster (Only APPROVED memberships appear with domains)
     const rosterList: ChapterMember[] = profList.map((prof: any) => {
       const approvedMem = memList.find(
         (m: any) => m.user_id === prof.id && m.status === 'APPROVED'
       );
       const sigObj = approvedMem ? sigList.find((s) => s.id === approvedMem.sig_id) : null;
 
-      // Calculate personal subtask progress
       const userTasks = tasksWithSubtasks.filter((t) => t.assigned_to === prof.id);
       let totalSub = 0;
       let completedSub = 0;
@@ -192,7 +196,6 @@ export default function ChairDashboard() {
     });
     setRoster(rosterList);
 
-    // Calculate Domain Stats
     const stats: SigStat[] = sigList.map((sig) => {
       const sigMembers = rosterList.filter((m) => m.sigId === sig.id);
       const sigTasks = tasksWithSubtasks.filter((t) => t.sig_id === sig.id);
@@ -222,8 +225,6 @@ export default function ChairDashboard() {
 
     setLoading(false);
   };
-
-  // --- ACTIONS ---
 
   const handleApproveRequest = async (req: DomainRequest) => {
     setActionLoadingId(req.userId);
@@ -310,6 +311,29 @@ export default function ChairDashboard() {
     setActionLoadingId(null);
   };
 
+  // SUCCESSION HANDLER
+  const handleExecuteSuccession = async () => {
+    if (!currentUserId || !successorCandidate) return;
+    if (successionConfirmText.trim().toUpperCase() !== 'TRANSFER') {
+      alert('Type TRANSFER to confirm succession.');
+      return;
+    }
+
+    setTransferringSuccession(true);
+    const res = await transferChairAuthority(currentUserId, successorCandidate.profileId);
+
+    if (res.error) {
+      alert('Succession failed: ' + res.error);
+      setTransferringSuccession(false);
+      return;
+    }
+
+    alert(`Succession complete! ${successorCandidate.fullName} is now the Chair.`);
+    setSuccessorCandidate(null);
+    setSuccessionConfirmText('');
+    router.replace('/dashboard/member');
+  };
+
   const handleExportCSV = () => {
     const headers = ['Full Name', 'Roll Number', 'Semester', 'Domain', 'Role', 'Progress'];
     const rows = roster.map((r) => [
@@ -332,7 +356,6 @@ export default function ChairDashboard() {
     document.body.removeChild(a);
   };
 
-  // Filtered Roster
   const filteredRoster = roster.filter(
     (m) =>
       m.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -345,12 +368,12 @@ export default function ChairDashboard() {
 
   return (
     <div className="space-y-6">
-      {/* EXECUTIVE HEADER & PILL TABS */}
+      {/* EXECUTIVE HEADER & TABS */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-blue-950/60 pb-6">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-white">Executive Suite</h1>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Club-wide governance, domain operations, and milestone tracking.
+            Club-wide governance, domain operations, and succession planning.
           </p>
         </div>
 
@@ -373,7 +396,7 @@ export default function ChairDashboard() {
                 : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            Roster &amp; Roles
+            Roster &amp; Succession
           </button>
           <button
             onClick={() => setActiveTab('requests')}
@@ -409,7 +432,7 @@ export default function ChairDashboard() {
         </div>
       ) : (
         <>
-          {/* ================= TAB 1: EXECUTIVE OVERVIEW ================= */}
+          {/* TAB 1: EXECUTIVE OVERVIEW */}
           {activeTab === 'overview' && (
             <div className="space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -462,7 +485,6 @@ export default function ChairDashboard() {
                 </div>
               </div>
 
-              {/* SIG Health Distribution Cards */}
               <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-6 shadow-lg">
                 <h3 className="text-sm font-semibold text-zinc-200 mb-5">
                   SIG Distribution &amp; Workload Health
@@ -493,12 +515,12 @@ export default function ChairDashboard() {
             </div>
           )}
 
-          {/* ================= TAB 2: MASTER ROSTER & ROLES ================= */}
+          {/* TAB 2: MASTER ROSTER & SUCCESSION ACTIONS */}
           {activeTab === 'roster' && (
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <h2 className="text-base font-semibold text-white">
-                  Master Chapter Roster (First-Come, First-Placed)
+                  Master Chapter Roster &amp; Succession Management
                 </h2>
                 <div className="flex items-center gap-2">
                   <div className="relative w-full sm:w-80">
@@ -531,7 +553,7 @@ export default function ChairDashboard() {
                         <th className="px-6 py-4">Assigned Domain</th>
                         <th className="px-6 py-4">Role</th>
                         <th className="px-6 py-4">Progress</th>
-                        <th className="px-6 py-4 text-right">Actions</th>
+                        <th className="px-6 py-4 text-right">Actions &amp; Succession</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-blue-950/40">
@@ -558,7 +580,8 @@ export default function ChairDashboard() {
                                       {member.fullName}
                                     </span>
                                     {isChair && (
-                                      <span className="px-1.5 py-0.5 rounded bg-blue-600/20 border border-blue-500/30 text-[10px] font-medium text-blue-400">
+                                      <span className="px-1.5 py-0.5 rounded bg-blue-600/20 border border-blue-500/30 text-[10px] font-medium text-blue-400 flex items-center gap-1">
+                                        <Crown className="h-3 w-3" />
                                         Chair
                                       </span>
                                     )}
@@ -639,6 +662,17 @@ export default function ChairDashboard() {
                               <td className="px-6 py-4 text-right">
                                 {!isChair ? (
                                   <div className="flex items-center justify-end gap-2">
+                                    {/* Successor Nomination Button */}
+                                    <button
+                                      onClick={() => setSuccessorCandidate(member)}
+                                      disabled={isBusy}
+                                      className="p-1.5 text-zinc-400 hover:text-amber-400 hover:bg-amber-500/10 rounded-md transition-colors flex items-center gap-1 text-xs"
+                                      title="Nominate as Chapter Chair Successor"
+                                    >
+                                      <Crown className="h-4 w-4 text-amber-400" />
+                                      <span className="hidden xl:inline text-[11px]">Pass Chair</span>
+                                    </button>
+
                                     {member.sigId && (
                                       <button
                                         onClick={() =>
@@ -654,6 +688,7 @@ export default function ChairDashboard() {
                                         <UserMinus className="h-4 w-4" />
                                       </button>
                                     )}
+
                                     <button
                                       onClick={() =>
                                         handleDeleteUserAccount(
@@ -673,8 +708,8 @@ export default function ChairDashboard() {
                                     </button>
                                   </div>
                                 ) : (
-                                  <span className="text-[10px] text-zinc-600 font-mono pr-2">
-                                    PROTECTED
+                                  <span className="text-[10px] text-blue-400 font-mono pr-2">
+                                    ACTIVE INCUMBENT
                                   </span>
                                 )}
                               </td>
@@ -689,7 +724,7 @@ export default function ChairDashboard() {
             </div>
           )}
 
-          {/* ================= TAB 3: PENDING REQUESTS ================= */}
+          {/* TAB 3: PENDING REQUESTS */}
           {activeTab === 'requests' && (
             <div className="space-y-4">
               <h2 className="text-base font-semibold text-white">
@@ -744,7 +779,7 @@ export default function ChairDashboard() {
             </div>
           )}
 
-          {/* ================= TAB 4: DETAILED SIG OVERVIEW ================= */}
+          {/* TAB 4: DETAILED SIG OVERVIEW */}
           {activeTab === 'sig-details' && (
             <div className="space-y-6">
               <div className="flex gap-2 border-b border-zinc-800 pb-4 overflow-x-auto">
@@ -834,6 +869,82 @@ export default function ChairDashboard() {
             </div>
           )}
         </>
+      )}
+
+      {/* CHAIR SUCCESSION CONFIRMATION MODAL */}
+      {successorCandidate && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-[#0c1222] border border-amber-500/30 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-5">
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-amber-500/10 rounded-xl text-amber-400 border border-amber-500/20 shrink-0">
+                <AlertTriangle className="h-6 w-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <span>Transfer Chair Authority</span>
+                  <Crown className="h-4 w-4 text-amber-400" />
+                </h3>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  You are about to transfer full executive governance of the ACM Chapter to{' '}
+                  <strong className="text-zinc-200">{successorCandidate.fullName}</strong> (
+                  <span className="font-mono text-amber-400">{successorCandidate.rollNumber}</span>).
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-amber-950/20 border border-amber-500/20 rounded-xl p-4 text-xs text-amber-300/90 space-y-2">
+              <p className="font-semibold text-amber-300">Important consequences:</p>
+              <ul className="list-disc pl-4 space-y-1 text-amber-400/80">
+                <li>Your account will immediately step down to a standard Member role.</li>
+                <li>You will immediately lose access to this Executive Suite.</li>
+                <li>Only the new Chair will be able to reverse this action.</li>
+              </ul>
+            </div>
+
+            <div className="space-y-2">
+              <label className="block text-xs font-medium text-zinc-300">
+                Type <span className="font-mono font-bold text-amber-400">TRANSFER</span> to confirm:
+              </label>
+              <input
+                type="text"
+                value={successionConfirmText}
+                onChange={(e) => setSuccessionConfirmText(e.target.value)}
+                placeholder="TRANSFER"
+                className="w-full bg-[#070b14] border border-amber-500/30 rounded-lg px-3.5 py-2.5 text-sm font-mono text-zinc-100 placeholder-zinc-700 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-blue-950/60">
+              <button
+                type="button"
+                onClick={() => {
+                  setSuccessorCandidate(null);
+                  setSuccessionConfirmText('');
+                }}
+                disabled={transferringSuccession}
+                className="px-4 py-2 text-xs font-semibold text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteSuccession}
+                disabled={
+                  transferringSuccession ||
+                  successionConfirmText.trim().toUpperCase() !== 'TRANSFER'
+                }
+                className="px-4 py-2 text-xs font-semibold bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-lg transition-colors flex items-center gap-1.5 shadow-lg shadow-amber-950/40"
+              >
+                {transferringSuccession ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Crown className="h-4 w-4" />
+                )}
+                <span>Confirm Succession</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
