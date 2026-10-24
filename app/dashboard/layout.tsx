@@ -4,14 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
-import { 
-  ShieldCheck, 
-  Layers, 
-  LogOut, 
-  Loader2, 
-  LayoutDashboard,
-  CheckCircle2
-} from 'lucide-react';
+import { LogOut, Loader2 } from 'lucide-react';
 
 export default function DashboardLayout({
   children,
@@ -40,28 +33,36 @@ export default function DashboardLayout({
         return;
       }
 
+      // Fetch user profile from database
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', session.user.id)
-        .single();
+        .maybeSingle();
 
-      if (error || !data) {
-        // Fallback: If profile fetch fails, check metadata
-        setProfile({
-          id: session.user.id,
-          full_name: session.user.user_metadata?.full_name || 'Member',
-          email: session.user.email || '',
-          global_role: session.user.user_metadata?.global_role || 'CHAIR'
-        });
-      } else {
-        setProfile(data);
+      const userRole = data?.global_role || session.user.user_metadata?.global_role || 'MEMBER';
+
+      const userProfile = {
+        id: session.user.id,
+        full_name: data?.full_name || session.user.user_metadata?.full_name || 'Member',
+        email: session.user.email || '',
+        global_role: userRole,
+        roll_number: data?.roll_number || session.user.email?.split('@')[0]?.toUpperCase() || 'ACM-MEMBER'
+      };
+
+      setProfile(userProfile);
+
+      // Security Guard: Prevent non-chairs from accessing Chair Executive Suite
+      if (pathname.startsWith('/dashboard/chair') && userRole !== 'CHAIR') {
+        router.replace('/dashboard/member');
+        return;
       }
+
       setLoading(false);
     }
 
     checkAuth();
-  }, [router, supabase]);
+  }, [router, pathname, supabase]);
 
   const handleSignOut = async () => {
     await supabase.auth.signOut();
@@ -78,7 +79,7 @@ export default function DashboardLayout({
 
   const isChair = profile?.global_role === 'CHAIR';
   const displayName = profile?.full_name || profile?.email?.split('@')[0] || 'User';
-  const roll = profile?.roll_number || profile?.email?.split('@')[0]?.toUpperCase() || 'ACM-MEMBER';
+  const roll = profile?.roll_number || 'ACM-MEMBER';
 
   return (
     <div className="min-h-screen bg-[#070b14] text-zinc-100 flex flex-col font-sans selection:bg-blue-600 selection:text-white">
@@ -100,16 +101,20 @@ export default function DashboardLayout({
             <div className="h-4 w-px bg-blue-950" />
 
             <div className="flex items-center gap-1.5">
-              <Link
-                href="/dashboard/chair"
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                  pathname.startsWith('/dashboard/chair')
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60'
-                }`}
-              >
-                Executive Suite
-              </Link>
+              {/* Only show Executive Suite to confirmed CHAIR accounts */}
+              {isChair && (
+                <Link
+                  href="/dashboard/chair"
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    pathname.startsWith('/dashboard/chair')
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60'
+                  }`}
+                >
+                  Executive Suite
+                </Link>
+              )}
+              
               <Link
                 href="/dashboard/member"
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
