@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import Image from 'next/image';
-import { ArrowRight, BarChart2, ShieldCheck, CheckSquare, Terminal } from 'lucide-react';
+import { ArrowRight, BarChart2, ShieldCheck, CheckSquare, Layers } from 'lucide-react';
 
 export default function LandingPage() {
   return (
@@ -24,7 +24,7 @@ export default function LandingPage() {
           </div>
           <Link 
             href="/login" 
-            className="text-xs font-medium text-zinc-400 hover:text-zinc-100 transition-colors border border-zinc-800 hover:border-zinc-700 bg-zinc-900/60 px-3 py-1.5 rounded-md"
+            className="text-xs font-medium text-zinc-300 hover:text-white transition-colors border border-zinc-800 hover:border-zinc-700 bg-zinc-900/60 px-3 py-1.5 rounded-md"
           >
             Sign In
           </Link>
@@ -34,10 +34,17 @@ export default function LandingPage() {
       {/* Main Hero Header */}
       <main className="max-w-6xl mx-auto px-6 pt-20 pb-16">
         <div className="max-w-3xl">
-          {/* Institutional Status Badge */}
-          <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded border border-zinc-800 bg-zinc-900/50 text-[11px] font-mono text-zinc-400 mb-6">
-            <Terminal className="h-3 w-3 text-zinc-400" />
-            <span>SPECIAL INTEREST GROUP TRACKER &bull; v2.0</span>
+          {/* Functional Domain Directory Badge (Replaced distracting pill) */}
+          <div className="inline-flex items-center gap-2.5 px-3 py-1 rounded border border-zinc-800 bg-zinc-900/40 text-xs text-zinc-400 mb-6 font-mono">
+            <Layers className="h-3.5 w-3.5 text-zinc-400" />
+            <span className="text-zinc-500">Domains:</span>
+            <span className="text-zinc-300">AI</span>
+            <span className="text-zinc-600">&bull;</span>
+            <span className="text-zinc-300">Web Dev</span>
+            <span className="text-zinc-600">&bull;</span>
+            <span className="text-zinc-300">Cyber</span>
+            <span className="text-zinc-600">&bull;</span>
+            <span className="text-zinc-300">Glitch</span>
           </div>
           
           <h1 className="text-4xl md:text-5xl font-semibold tracking-tight text-zinc-100 mb-5 leading-tight">
