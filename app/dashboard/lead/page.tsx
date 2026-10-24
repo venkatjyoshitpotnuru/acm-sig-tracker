@@ -14,7 +14,9 @@ import {
   ChevronUp,
   Circle,
   Pencil,
-  X
+  X,
+  Clock,
+  Check
 } from 'lucide-react';
 
 interface Subtask {
@@ -33,6 +35,14 @@ interface DomainMember {
   totalSubtasks: number;
   completedSubtasks: number;
   progressPercent: number;
+}
+
+interface DomainRequest {
+  id: string; // the sig_membership row ID
+  userId: string;
+  fullName: string;
+  rollNumber: string;
+  semester: string;
 }
 
 interface SigTask {
@@ -73,13 +83,15 @@ export default function LeadDashboard() {
 
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   // Lead Domain Info & Current User
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [leadSig, setLeadSig] = useState<{ id: string; name: string } | null>(null);
   const [domainMembers, setDomainMembers] = useState<DomainMember[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<DomainRequest[]>([]);
   const [tasks, setTasks] = useState<SigTask[]>([]);
-  const [activeTab, setActiveTab] = useState<'roster' | 'tasks'>('roster');
+  const [activeTab, setActiveTab] = useState<'roster' | 'tasks' | 'requests'>('roster');
   const [expandedDeliverable, setExpandedDeliverable] = useState<string | null>(null);
 
   // Task Creation Form State
@@ -139,7 +151,7 @@ export default function LeadDashboard() {
 
     setLeadSig({ id: activeSig.id, name: activeSig.name });
 
-    // 2. Fetch members, tasks, and ordered subtasks
+    // 2. Fetch ALL memberships for this SIG (both APPROVED and PENDING)
     const [
       { data: membershipsData },
       { data: profilesData },
@@ -149,8 +161,7 @@ export default function LeadDashboard() {
       supabase
         .from('sig_memberships')
         .select('*')
-        .eq('sig_id', activeSig.id)
-        .eq('status', 'APPROVED'),
+        .eq('sig_id', activeSig.id),
       supabase.from('profiles').select('*'),
       supabase
         .from('tasks')
@@ -164,9 +175,29 @@ export default function LeadDashboard() {
     ]);
 
     const profs = profilesData || [];
+    const allMemberships = membershipsData || [];
     const taskList = tasksData || [];
     const subList: Subtask[] = subtasksData || [];
 
+    // Extract APPROVED members
+    const approvedMemberships = allMemberships.filter((m: any) => m.status === 'APPROVED');
+    
+    // Extract PENDING requests
+    const requestsList: DomainRequest[] = allMemberships
+      .filter((m: any) => m.status === 'PENDING')
+      .map((m: any) => {
+        const p = profs.find((prof: any) => prof.id === m.user_id);
+        return {
+          id: m.id,
+          userId: m.user_id,
+          fullName: p?.full_name || 'ACM Member',
+          rollNumber: p?.roll_number || (p?.email ? p.email.split('@')[0].toUpperCase() : 'N/A'),
+          semester: m.semester ? `Sem ${m.semester}` : 'Sem 1'
+        };
+      });
+    setPendingRequests(requestsList);
+
+    // Build Full Tasks
     const fullTasks: SigTask[] = taskList.map((t: any) => {
       const assignedProf = profs.find((p: any) => p.id === t.assigned_to);
       return {
@@ -177,7 +208,8 @@ export default function LeadDashboard() {
     });
     setTasks(fullTasks);
 
-    const members: DomainMember[] = (membershipsData || []).map((m: any) => {
+    // Build Approved Domain Member Roster
+    const members: DomainMember[] = approvedMemberships.map((m: any) => {
       const p = profs.find((prof: any) => prof.id === m.user_id);
       const userTasks = fullTasks.filter((t) => t.assigned_to === m.user_id);
 
@@ -258,16 +290,38 @@ export default function LeadDashboard() {
     });
   }, [tasks, domainMembers]);
 
-  const handleAddSubtaskInput = () => {
-    setSubtaskList([...subtaskList, '']);
+  // --- ACTIONS ---
+
+  const handleApproveRequest = async (req: DomainRequest) => {
+    if (!leadSig) return;
+    setActionLoadingId(req.userId);
+    await supabase
+      .from('sig_memberships')
+      .update({ status: 'APPROVED' })
+      .eq('user_id', req.userId)
+      .eq('sig_id', leadSig.id);
+    await fetchLeadDashboard();
+    setActionLoadingId(null);
   };
 
+  const handleRejectRequest = async (req: DomainRequest) => {
+    if (!leadSig) return;
+    setActionLoadingId(req.userId);
+    await supabase
+      .from('sig_memberships')
+      .delete()
+      .eq('user_id', req.userId)
+      .eq('sig_id', leadSig.id);
+    await fetchLeadDashboard();
+    setActionLoadingId(null);
+  };
+
+  const handleAddSubtaskInput = () => setSubtaskList([...subtaskList, '']);
   const handleSubtaskChange = (index: number, val: string) => {
     const updated = [...subtaskList];
     updated[index] = val;
     setSubtaskList(updated);
   };
-
   const handleRemoveSubtaskInput = (index: number) => {
     setSubtaskList(subtaskList.filter((_, i) => i !== index));
   };
@@ -350,7 +404,6 @@ export default function LeadDashboard() {
     }
   };
 
-  // Open Edit Modal with current values
   const handleOpenEdit = (group: GroupedDeliverable) => {
     setEditingDeliverable(group);
     setEditTitle(group.title);
@@ -359,7 +412,6 @@ export default function LeadDashboard() {
     setEditPriority(group.priority);
   };
 
-  // Submit Updates to Supabase for all task IDs in this deliverable
   const handleUpdateTask = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingDeliverable) return;
@@ -430,7 +482,7 @@ export default function LeadDashboard() {
                 : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            Domain Roster &amp; Progress ({domainMembers.length})
+            Domain Roster ({domainMembers.length})
           </button>
           <button
             onClick={() => setActiveTab('tasks')}
@@ -440,7 +492,22 @@ export default function LeadDashboard() {
                 : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            Active Deliverables ({groupedDeliverables.length})
+            Deliverables ({groupedDeliverables.length})
+          </button>
+          <button
+            onClick={() => setActiveTab('requests')}
+            className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+              activeTab === 'requests'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <span>Requests</span>
+            {pendingRequests.length > 0 && (
+              <span className="bg-amber-500 text-amber-950 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+                {pendingRequests.length}
+              </span>
+            )}
           </button>
         </div>
       </div>
@@ -624,7 +691,7 @@ export default function LeadDashboard() {
           </form>
         </div>
 
-        {/* RIGHT COLUMN: SWITCHABLE ROSTER & UNIFIED DELIVERABLES */}
+        {/* RIGHT COLUMN: SWITCHABLE ROSTER, TASKS, OR REQUESTS */}
         <div className="lg:col-span-2 space-y-4">
 
           {/* VIEW 1: DOMAIN ROSTER & PROGRESS TABLE */}
@@ -827,7 +894,6 @@ export default function LeadDashboard() {
                                 </div>
                               </div>
 
-                              {/* Member Specific Checklist */}
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 pl-2">
                                 {member.subtasks.map((st, idx) => (
                                   <div
@@ -857,6 +923,60 @@ export default function LeadDashboard() {
                   );
                 })
               )}
+            </div>
+          )}
+
+          {/* VIEW 3: PENDING ENROLLMENT REQUESTS (SCOPED TO LEAD'S SIG) */}
+          {activeTab === 'requests' && (
+            <div className="space-y-4">
+              <h2 className="text-base font-semibold text-white">
+                {leadSig?.name} Enrollment Requests (Pending)
+              </h2>
+              <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl overflow-hidden shadow-lg">
+                {pendingRequests.length === 0 ? (
+                  <div className="p-12 text-center text-zinc-500 text-sm">
+                    No pending enrollment requests for your domain.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-blue-950/40">
+                    {pendingRequests.map((req) => (
+                      <div
+                        key={req.id}
+                        className="p-5 flex items-center justify-between gap-4"
+                      >
+                        <div>
+                          <p className="font-medium text-zinc-200 text-sm">{req.fullName}</p>
+                          <p className="text-xs text-zinc-500 uppercase">
+                            {req.rollNumber} • Sem {req.semester}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleRejectRequest(req)}
+                            disabled={actionLoadingId === req.userId}
+                            className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs rounded-lg transition-colors flex items-center gap-1"
+                          >
+                            <X className="h-3.5 w-3.5 text-red-400" />
+                            <span>Decline</span>
+                          </button>
+                          <button
+                            onClick={() => handleApproveRequest(req)}
+                            disabled={actionLoadingId === req.userId}
+                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1"
+                          >
+                            {actionLoadingId === req.userId ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Check className="h-3.5 w-3.5" />
+                            )}
+                            <span>Approve Enrollment</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
