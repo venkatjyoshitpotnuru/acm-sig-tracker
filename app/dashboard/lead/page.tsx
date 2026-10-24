@@ -12,7 +12,9 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Circle
+  Circle,
+  Pencil,
+  X
 } from 'lucide-react';
 
 interface Subtask {
@@ -90,6 +92,14 @@ export default function LeadDashboard() {
   const [selectedSemester, setSelectedSemester] = useState('Sem 1');
   const [subtaskList, setSubtaskList] = useState<string[]>(['']);
 
+  // Edit Task Modal State
+  const [editingDeliverable, setEditingDeliverable] = useState<GroupedDeliverable | null>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editDueDate, setEditDueDate] = useState('');
+  const [editPriority, setEditPriority] = useState<'LOW' | 'MEDIUM' | 'HIGH'>('MEDIUM');
+  const [editSubmitting, setEditSubmitting] = useState(false);
+
   useEffect(() => {
     fetchLeadDashboard();
   }, []);
@@ -129,7 +139,7 @@ export default function LeadDashboard() {
 
     setLeadSig({ id: activeSig.id, name: activeSig.name });
 
-    // 2. Fetch members, tasks, and SUBTASKS STRICTLY ORDERED by created_at ascending
+    // 2. Fetch members, tasks, and ordered subtasks
     const [
       { data: membershipsData },
       { data: profilesData },
@@ -150,14 +160,13 @@ export default function LeadDashboard() {
       supabase
         .from('subtasks')
         .select('*')
-        .order('created_at', { ascending: true }) // Preserves insertion order (c before n)
+        .order('created_at', { ascending: true })
     ]);
 
     const profs = profilesData || [];
     const taskList = tasksData || [];
     const subList: Subtask[] = subtasksData || [];
 
-    // Map tasks with ordered subtasks
     const fullTasks: SigTask[] = taskList.map((t: any) => {
       const assignedProf = profs.find((p: any) => p.id === t.assigned_to);
       return {
@@ -168,7 +177,6 @@ export default function LeadDashboard() {
     });
     setTasks(fullTasks);
 
-    // Member Roster & individual progress calculation
     const members: DomainMember[] = (membershipsData || []).map((m: any) => {
       const p = profs.find((prof: any) => prof.id === m.user_id);
       const userTasks = fullTasks.filter((t) => t.assigned_to === m.user_id);
@@ -203,7 +211,6 @@ export default function LeadDashboard() {
     setLoading(false);
   };
 
-  // Group multiple user task rows of the same assignment into one unified deliverable card
   const groupedDeliverables: GroupedDeliverable[] = useMemo(() => {
     const groups: { [key: string]: GroupedDeliverable } = {};
 
@@ -241,7 +248,6 @@ export default function LeadDashboard() {
       }
     });
 
-    // Calculate aggregated completion percentage for each grouped deliverable
     return Object.values(groups).map((group) => {
       const totalAllSubs = group.members.reduce((acc, m) => acc + m.totalCount, 0);
       const completedAllSubs = group.members.reduce((acc, m) => acc + m.completedCount, 0);
@@ -298,7 +304,6 @@ export default function LeadDashboard() {
     setSubmitting(true);
 
     try {
-      // Clean subtasks in order
       const cleanSubtasks = subtaskList
         .map((s) => s.trim())
         .filter((s) => s.length > 0);
@@ -320,7 +325,6 @@ export default function LeadDashboard() {
 
         if (taskErr) throw taskErr;
 
-        // Insert subtasks in chronological sequence so created_at preserves input order
         if (cleanSubtasks.length > 0 && insertedTask) {
           for (let i = 0; i < cleanSubtasks.length; i++) {
             await supabase.from('subtasks').insert({
@@ -343,6 +347,43 @@ export default function LeadDashboard() {
       alert('Failed to assign task: ' + err.message);
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  // Open Edit Modal with current values
+  const handleOpenEdit = (group: GroupedDeliverable) => {
+    setEditingDeliverable(group);
+    setEditTitle(group.title);
+    setEditDescription(group.description || '');
+    setEditDueDate(group.due_date || '');
+    setEditPriority(group.priority);
+  };
+
+  // Submit Updates to Supabase for all task IDs in this deliverable
+  const handleUpdateTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingDeliverable) return;
+
+    setEditSubmitting(true);
+    try {
+      const { error } = await supabase
+        .from('tasks')
+        .update({
+          title: editTitle,
+          description: editDescription,
+          due_date: editDueDate || null,
+          priority: editPriority
+        })
+        .in('id', editingDeliverable.taskIds);
+
+      if (error) throw error;
+
+      setEditingDeliverable(null);
+      await fetchLeadDashboard();
+    } catch (err: any) {
+      alert('Failed to update deliverable: ' + err.message);
+    } finally {
+      setEditSubmitting(false);
     }
   };
 
@@ -406,7 +447,7 @@ export default function LeadDashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         
-        {/* LEFT COLUMN: DELIVERABLE ASSIGNMENT FORM */}
+        {/* LEFT COLUMN: DELIVERABLE CREATION FORM */}
         <div className="lg:col-span-1 bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-6 shadow-xl h-fit">
           <h2 className="text-base font-semibold text-white mb-4 flex items-center gap-2">
             <Plus className="h-4 w-4 text-blue-400" />
@@ -534,10 +575,10 @@ export default function LeadDashboard() {
               )}
             </div>
 
-            {/* CHECKLIST / SUBTASKS (Ordered steps) */}
+            {/* CHECKLIST / SUBTASKS */}
             <div className="border-t border-blue-950/60 pt-4">
               <div className="flex items-center justify-between mb-2">
-                <label className="text-xs font-medium text-zinc-400">Milestone Steps (Preserves order)</label>
+                <label className="text-xs font-medium text-zinc-400">Milestone Steps</label>
                 <button
                   type="button"
                   onClick={handleAddSubtaskInput}
@@ -668,7 +709,7 @@ export default function LeadDashboard() {
             </div>
           )}
 
-          {/* VIEW 2: UNIFIED DELIVERABLES WITH MEMBER PROGRESS DROPDOWNS */}
+          {/* VIEW 2: UNIFIED DELIVERABLES WITH MEMBER PROGRESS & EDIT */}
           {activeTab === 'tasks' && (
             <div className="space-y-4">
               {groupedDeliverables.length === 0 ? (
@@ -723,11 +764,19 @@ export default function LeadDashboard() {
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-3">
+                        {/* ACTIONS: EDIT & DELETE */}
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => handleOpenEdit(group)}
+                            className="text-zinc-400 hover:text-blue-400 p-2 rounded-lg hover:bg-blue-500/10 transition-colors"
+                            title="Edit Deliverable"
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
                           <button
                             onClick={() => handleDeleteGroupedDeliverable(group.taskIds)}
                             className="text-zinc-500 hover:text-red-400 p-2 rounded-lg hover:bg-red-500/10 transition-colors"
-                            title="Delete this Deliverable"
+                            title="Delete Deliverable"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
@@ -778,7 +827,7 @@ export default function LeadDashboard() {
                                 </div>
                               </div>
 
-                              {/* Member Specific Checklist with Strict Ordered Steps */}
+                              {/* Member Specific Checklist */}
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 pl-2">
                                 {member.subtasks.map((st, idx) => (
                                   <div
@@ -813,6 +862,95 @@ export default function LeadDashboard() {
 
         </div>
       </div>
+
+      {/* EDIT DELIVERABLE MODAL */}
+      {editingDeliverable && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-[#0c1222] border border-blue-950 rounded-2xl w-full max-w-lg p-6 shadow-2xl space-y-5">
+            <div className="flex items-center justify-between border-b border-blue-950/60 pb-4">
+              <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                <Pencil className="h-4 w-4 text-blue-400" />
+                Edit Deliverable
+              </h3>
+              <button
+                onClick={() => setEditingDeliverable(null)}
+                className="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800/60"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateTask} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1.5">Deliverable Title</label>
+                <input
+                  type="text"
+                  required
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="w-full bg-[#070b14] border border-blue-950/70 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-blue-700"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1.5">Description</label>
+                <textarea
+                  rows={3}
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  className="w-full bg-[#070b14] border border-blue-950/70 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-blue-700"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5">Due Date</label>
+                  <input
+                    type="date"
+                    value={editDueDate}
+                    onChange={(e) => setEditDueDate(e.target.value)}
+                    className="w-full bg-[#070b14] border border-blue-950/70 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-blue-700"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-400 mb-1.5">Priority</label>
+                  <select
+                    value={editPriority}
+                    onChange={(e) => setEditPriority(e.target.value as any)}
+                    className="w-full bg-[#070b14] border border-blue-950/70 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-blue-700"
+                  >
+                    <option value="LOW">Low</option>
+                    <option value="MEDIUM">Medium</option>
+                    <option value="HIGH">High</option>
+                  </select>
+                </div>
+              </div>
+
+              <p className="text-[11px] text-zinc-500">
+                Updating this deliverable will reflect across all {editingDeliverable.members.length} assigned member accounts without affecting their completed milestones.
+              </p>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-blue-950/60">
+                <button
+                  type="button"
+                  onClick={() => setEditingDeliverable(null)}
+                  className="px-4 py-2 text-xs font-semibold text-zinc-400 hover:text-white rounded-lg hover:bg-zinc-800 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={editSubmitting}
+                  className="px-4 py-2 text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white rounded-lg transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {editSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  <span>Save Changes</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
