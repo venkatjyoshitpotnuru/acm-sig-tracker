@@ -3,549 +3,837 @@
 import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { toast } from 'sonner';
+import { deleteUserAccount } from '@/app/actions/admin';
 import {
-  ShieldCheck, Layers, CheckCircle2, Circle, UserCheck, Calendar, UserCog,
-  Search, AlertTriangle, Clock, Check, X, ArrowRightLeft, UserMinus,
-  Eye, ChevronDown, ChevronUp
+  ShieldCheck,
+  Layers,
+  CheckCircle2,
+  Calendar,
+  UserCog,
+  Search,
+  Clock,
+  Check,
+  X,
+  UserMinus,
+  Trash2,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  Loader2,
+  Users,
+  Activity
 } from 'lucide-react';
 
-interface Subtask { id: string; task_id: string; title: string; is_completed: boolean; }
-interface TaskItem { id: string; sig_id: string; title: string; description: string; due_date: string; priority: 'LOW' | 'MEDIUM' | 'HIGH'; assigned_to: string; subtasks: Subtask[]; }
-interface SigItem { id: string; name: string; description: string; }
-interface SigStat extends SigItem { totalTasks: number; completedTasks: number; totalSubtasks: number; completedSubtasks: number; memberCount: number; completionRate: number; }
-interface ChapterMember { 
-  profileId: string; fullName: string; rollNumber: string; globalRole: string; 
-  sigId?: string; sigName?: string; sigRole?: 'MEMBER' | 'CO_LEAD' | 'LEAD'; 
-  status?: string; semester?: string;
-  completedTasks: number; totalTasks: number; percent: number;
+interface Subtask {
+  id: string;
+  task_id: string;
+  title: string;
+  is_completed: boolean;
+}
+
+interface TaskItem {
+  id: string;
+  sig_id: string;
+  title: string;
+  description: string;
+  due_date: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH';
+  assigned_to: string;
+  subtasks: Subtask[];
+}
+
+interface SigItem {
+  id: string;
+  name: string;
+  description: string;
+}
+
+interface SigStat extends SigItem {
+  totalTasks: number;
+  completedTasks: number;
+  totalSubtasks: number;
+  completedSubtasks: number;
+  memberCount: number;
+  completionRate: number;
+}
+
+interface ChapterMember {
+  profileId: string;
+  fullName: string;
+  rollNumber: string;
+  globalRole: string;
+  sigId?: string;
+  sigName?: string;
+  sigRole?: 'MEMBER' | 'LEAD';
+  status?: string;
+  semester?: string;
+  completedSubtasks: number;
+  totalSubtasks: number;
+  progressPercent: number;
+  createdAt: string;
+}
+
+interface DomainRequest {
+  id: string; // sig_membership id or composite
+  userId: string;
+  fullName: string;
+  rollNumber: string;
+  semester: string;
+  sigId: string;
+  sigName: string;
+  status: string;
 }
 
 export default function ChairDashboard() {
   const router = useRouter();
   const supabase = createClient();
 
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'overview' | 'roster' | 'requests' | 'sig-details'>('overview');
+  const [selectedSigTab, setSelectedSigTab] = useState<string>('SIG-AI');
+  const [expandedSigId, setExpandedSigId] = useState<string | null>(null);
+
   const [sigs, setSigs] = useState<SigItem[]>([]);
   const [sigStats, setSigStats] = useState<SigStat[]>([]);
-  const [myTasks, setMyTasks] = useState<TaskItem[]>([]);
-  const [allGlobalTasks, setAllGlobalTasks] = useState<TaskItem[]>([]);
   const [roster, setRoster] = useState<ChapterMember[]>([]);
-  const [pendingRequests, setPendingRequests] = useState<ChapterMember[]>([]);
-  
+  const [requests, setRequests] = useState<DomainRequest[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'overview' | 'admin' | 'requests' | 'personal'>('overview');
-  const [loading, setLoading] = useState(true);
-  const [authErrorMsg, setAuthErrorMsg] = useState<string | null>(null);
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
-
-  const [expandedSigs, setExpandedSigs] = useState<Record<string, boolean>>({});
-  const [showSuccessionModal, setShowSuccessionModal] = useState(false);
-  const [successorId, setSuccessorId] = useState('');
-  const [isTransferring, setIsTransferring] = useState(false);
-  const [viewingMemberId, setViewingMemberId] = useState<string | null>(null);
-
-  const loadData = async () => {
-    try {
-      const { data: { user }, error: authErr } = await supabase.auth.getUser();
-      if (authErr || !user) { setAuthErrorMsg('Session expired.'); setLoading(false); return; }
-      setCurrentUserId(user.id);
-
-      let { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
-      
-      if ((profile?.global_role || '').toString().trim().toUpperCase() !== 'CHAIR') {
-        setAuthErrorMsg('Access Restricted. Only the Chapter Chair can access this suite.');
-        setLoading(false);
-        return;
-      }
-
-      const [
-        { data: sigsData }, { data: allTasks }, { data: allSubtasks },
-        { data: memberships }, { data: profiles },
-      ] = await Promise.all([
-        supabase.from('sigs').select('*'), supabase.from('tasks').select('*'),
-        supabase.from('subtasks').select('*'), supabase.from('sig_memberships').select('sig_id, user_id, role, status, semester'),
-        supabase.from('profiles').select('*'),
-      ]);
-
-      const tasksList = allTasks || [];
-      const subtasksList = (allSubtasks as Subtask[]) || [];
-      const rawSigs = sigsData || [];
-      setSigs(rawSigs);
-
-      const compiledGlobalTasks: TaskItem[] = tasksList.map(t => ({
-        ...t, subtasks: subtasksList.filter(st => st.task_id === t.id)
-      }));
-      setAllGlobalTasks(compiledGlobalTasks);
-
-      if (rawSigs.length > 0) {
-        setSigStats(rawSigs.map((sig) => {
-          const sigTasks = compiledGlobalTasks.filter((t) => t.sig_id === sig.id);
-          let cSt = 0; let tSt = 0;
-          sigTasks.forEach(t => { tSt += t.subtasks.length; cSt += t.subtasks.filter(s => s.is_completed).length; });
-          const membersInSig = (memberships || []).filter((m) => m.sig_id === sig.id && m.status === 'APPROVED');
-          return {
-            id: sig.id, name: sig.name, description: sig.description || '', totalTasks: sigTasks.length, completedTasks: 0,
-            totalSubtasks: tSt, completedSubtasks: cSt, memberCount: membersInSig.length,
-            completionRate: tSt > 0 ? Math.round((cSt / tSt) * 100) : 0,
-          };
-        }));
-      }
-
-      setMyTasks(compiledGlobalTasks.filter((t) => t.assigned_to === user.id));
-
-      const memberMap = new Map<string, any>();
-      (memberships || []).forEach((m) => memberMap.set(m.user_id, m));
-
-      const allMembers: ChapterMember[] = (profiles || []).map((p) => {
-        const mem = memberMap.get(p.id);
-        const sig = rawSigs.find((s) => s.id === mem?.sig_id);
-        
-        const memberTasks = compiledGlobalTasks.filter(t => t.assigned_to === p.id);
-        let cSt = 0; let tSt = 0;
-        memberTasks.forEach(t => { tSt += t.subtasks.length; cSt += t.subtasks.filter(s => s.is_completed).length; });
-
-        return {
-          profileId: p.id, fullName: p.full_name || 'Member', rollNumber: p.roll_number || 'N/A',
-          globalRole: p.global_role || 'MEMBER', sigId: mem?.sig_id, sigName: sig?.name || 'Unassigned',
-          sigRole: mem?.role || 'MEMBER', status: mem?.status || 'N/A', semester: mem?.semester || 'N/A',
-          completedTasks: cSt, totalTasks: tSt, percent: tSt > 0 ? Math.round((cSt / tSt) * 100) : 0
-        };
-      });
-
-      const active = allMembers.filter(m => m.status !== 'PENDING').sort((a, b) => {
-        if (a.globalRole === 'CHAIR') return -1;
-        if (b.globalRole === 'CHAIR') return 1;
-        return 0;
-      });
-      setRoster(active);
-      setPendingRequests(allMembers.filter(m => m.status === 'PENDING'));
-    } catch (err) { console.error(err); } finally { setLoading(false); }
-  };
+  const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
   useEffect(() => {
-    loadData();
-    const channel = supabase.channel('chair-portal-sync')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, () => loadData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'subtasks' }, () => loadData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'sig_memberships' }, () => loadData())
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [supabase]);
+    fetchChairDashboardData();
+  }, []);
 
-  const clubTotals = useMemo(() => {
-    let subtasksTotal = 0, subtasksDone = 0, totalMemberships = 0;
-    sigStats.forEach((s) => { subtasksTotal += s.totalSubtasks; subtasksDone += s.completedSubtasks; totalMemberships += s.memberCount; });
-    return { sigsCount: sigStats.length, subtasksTotal, subtasksDone, totalMemberships, averageRate: subtasksTotal > 0 ? Math.round((subtasksDone / subtasksTotal) * 100) : 0 };
-  }, [sigStats]);
+  const fetchChairDashboardData = async () => {
+    setLoading(true);
 
-  const chairPersonalStats = useMemo(() => {
-    let total = 0, done = 0;
-    myTasks.forEach((t) => { total += t.subtasks.length; done += t.subtasks.filter((s) => s.is_completed).length; });
-    return { total, done, percent: total > 0 ? Math.round((done / total) * 100) : 0 };
-  }, [myTasks]);
+    const [
+      { data: sigsData },
+      { data: profilesData },
+      { data: membershipsData },
+      { data: tasksData },
+      { data: subtasksData }
+    ] = await Promise.all([
+      supabase.from('sigs').select('*').order('name', { ascending: true }),
+      supabase.from('profiles').select('*').order('created_at', { ascending: true }),
+      supabase.from('sig_memberships').select('*'),
+      supabase.from('tasks').select('*'),
+      supabase.from('subtasks').select('*')
+    ]);
 
-  const toggleSubtask = async (taskId: string, subtaskId: string, currentState: boolean) => {
-    const nextState = !currentState;
-    setMyTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, subtasks: t.subtasks.map((st) => st.id === subtaskId ? { ...st, is_completed: nextState } : st ) } : t));
-    try {
-      const { error } = await supabase.from('subtasks').update({ is_completed: nextState, completed_at: nextState ? new Date().toISOString() : null }).eq('id', subtaskId);
-      if (error) throw error;
-    } catch (err: any) {
-      toast.error('Failed to update task.');
-      loadData();
+    const sigList: SigItem[] = sigsData || [];
+    const profList = profilesData || [];
+    const memList = membershipsData || [];
+    const taskList = tasksData || [];
+    const subList: Subtask[] = subtasksData || [];
+
+    setSigs(sigList);
+
+    // Group tasks with subtasks
+    const tasksWithSubtasks: TaskItem[] = taskList.map((t: any) => ({
+      ...t,
+      subtasks: subList.filter((st) => st.task_id === t.id)
+    }));
+
+    // Build Pending Requests Queue
+    const pendingList: DomainRequest[] = [];
+    memList
+      .filter((m: any) => m.status === 'PENDING')
+      .forEach((m: any) => {
+        const prof = profList.find((p: any) => p.id === m.user_id);
+        const sig = sigList.find((s) => s.id === m.sig_id);
+        if (prof && sig) {
+          pendingList.push({
+            id: m.id || `${m.user_id}-${m.sig_id}`,
+            userId: prof.id,
+            fullName: prof.full_name || 'ACM Member',
+            rollNumber: prof.roll_number || (prof.email ? prof.email.split('@')[0].toUpperCase() : 'N/A'),
+            semester: m.semester ? String(m.semester) : 'N/A',
+            sigId: sig.id,
+            sigName: sig.name,
+            status: 'PENDING'
+          });
+        }
+      });
+    setRequests(pendingList);
+
+    // Build Chronological Roster (Only APPROVED memberships appear with domains)
+    const rosterList: ChapterMember[] = profList.map((prof: any) => {
+      const approvedMem = memList.find(
+        (m: any) => m.user_id === prof.id && m.status === 'APPROVED'
+      );
+      const sigObj = approvedMem ? sigList.find((s) => s.id === approvedMem.sig_id) : null;
+
+      // Calculate personal subtask progress
+      const userTasks = tasksWithSubtasks.filter((t) => t.assigned_to === prof.id);
+      let totalSub = 0;
+      let completedSub = 0;
+      userTasks.forEach((t) => {
+        totalSub += t.subtasks.length;
+        completedSub += t.subtasks.filter((st) => st.is_completed).length;
+      });
+      const pct = totalSub > 0 ? Math.round((completedSub / totalSub) * 100) : 0;
+
+      return {
+        profileId: prof.id,
+        fullName: prof.full_name || 'Member',
+        rollNumber: prof.roll_number || (prof.email ? prof.email.split('@')[0].toUpperCase() : 'N/A'),
+        globalRole: prof.global_role || 'MEMBER',
+        sigId: sigObj?.id,
+        sigName: sigObj?.name,
+        sigRole: approvedMem?.role || 'MEMBER',
+        status: approvedMem?.status || 'UNASSIGNED',
+        semester: approvedMem?.semester ? String(approvedMem.semester) : 'N/A',
+        completedSubtasks: completedSub,
+        totalSubtasks: totalSub,
+        progressPercent: pct,
+        createdAt: prof.created_at || ''
+      };
+    });
+    setRoster(rosterList);
+
+    // Calculate Domain Stats
+    const stats: SigStat[] = sigList.map((sig) => {
+      const sigMembers = rosterList.filter((m) => m.sigId === sig.id);
+      const sigTasks = tasksWithSubtasks.filter((t) => t.sig_id === sig.id);
+
+      let totalSub = 0;
+      let completedSub = 0;
+      sigTasks.forEach((t) => {
+        totalSub += t.subtasks.length;
+        completedSub += t.subtasks.filter((st) => st.is_completed).length;
+      });
+
+      const completionRate = totalSub > 0 ? Math.round((completedSub / totalSub) * 100) : 0;
+
+      return {
+        ...sig,
+        totalTasks: sigTasks.length,
+        completedTasks: sigTasks.filter(
+          (t) => t.subtasks.length > 0 && t.subtasks.every((st) => st.is_completed)
+        ).length,
+        totalSubtasks: totalSub,
+        completedSubtasks: completedSub,
+        memberCount: sigMembers.length,
+        completionRate
+      };
+    });
+    setSigStats(stats);
+
+    setLoading(false);
+  };
+
+  // --- ACTIONS ---
+
+  const handleApproveRequest = async (req: DomainRequest) => {
+    setActionLoadingId(req.userId);
+    await supabase
+      .from('sig_memberships')
+      .update({ status: 'APPROVED' })
+      .eq('user_id', req.userId)
+      .eq('sig_id', req.sigId);
+    await fetchChairDashboardData();
+    setActionLoadingId(null);
+  };
+
+  const handleRejectRequest = async (req: DomainRequest) => {
+    setActionLoadingId(req.userId);
+    await supabase
+      .from('sig_memberships')
+      .delete()
+      .eq('user_id', req.userId)
+      .eq('sig_id', req.sigId);
+    await fetchChairDashboardData();
+    setActionLoadingId(null);
+  };
+
+  const handleAssignDomain = async (userId: string, newSigId: string) => {
+    setActionLoadingId(userId);
+    if (!newSigId) {
+      await supabase.from('sig_memberships').delete().eq('user_id', userId);
+    } else {
+      const { data: existing } = await supabase
+        .from('sig_memberships')
+        .select('*')
+        .eq('user_id', userId);
+
+      if (existing && existing.length > 0) {
+        await supabase
+          .from('sig_memberships')
+          .update({ sig_id: newSigId, status: 'APPROVED' })
+          .eq('user_id', userId);
+      } else {
+        await supabase.from('sig_memberships').insert({
+          user_id: userId,
+          sig_id: newSigId,
+          role: 'MEMBER',
+          status: 'APPROVED'
+        });
+      }
     }
+    await fetchChairDashboardData();
+    setActionLoadingId(null);
   };
 
-  const handleUpdateMembership = async (userId: string, newSigId: string, newRole: string, currentSemester: string) => {
-    setUpdatingId(userId);
-    try {
-      const { error } = await supabase.from('sig_memberships').upsert({ user_id: userId, sig_id: newSigId, role: newRole, status: 'APPROVED', semester: currentSemester === 'N/A' ? '1' : currentSemester }, { onConflict: 'user_id,sig_id' });
-      if (error) throw error;
-      await loadData();
-      toast.success('Role updated.');
-    } catch (err: any) { toast.error(err.message); } finally { setUpdatingId(null); }
+  const handleSigRoleChange = async (userId: string, sigId: string | undefined, newRole: 'MEMBER' | 'LEAD') => {
+    if (!sigId) return;
+    setActionLoadingId(userId);
+    const { error } = await supabase
+      .from('sig_memberships')
+      .update({ role: newRole })
+      .eq('user_id', userId)
+      .eq('sig_id', sigId);
+
+    if (error) alert('Error updating role: ' + error.message);
+    await fetchChairDashboardData();
+    setActionLoadingId(null);
   };
 
-  const handleRemoveMember = async (userId: string, sigId: string) => {
-    if (confirm("Permanently remove this member from the domain?")) {
-      try {
-        const { error } = await supabase.rpc('remove_member_from_sig', { target_user_id: userId, target_sig_id: sigId });
-        if (error) throw error;
-        await loadData();
-        toast.success('Member removed.');
-      } catch (err: any) { toast.error(err.message); }
+  const handleRemoveFromDomain = async (userId: string, name: string) => {
+    if (!confirm(`Remove ${name} from their assigned domain?`)) return;
+    setActionLoadingId(userId);
+    await supabase.from('sig_memberships').delete().eq('user_id', userId);
+    await fetchChairDashboardData();
+    setActionLoadingId(null);
+  };
+
+  const handleDeleteUserAccount = async (userId: string, name: string) => {
+    if (!confirm(`Are you sure you want to permanently delete ${name}'s account?`)) return;
+    setActionLoadingId(userId);
+    await supabase.from('sig_memberships').delete().eq('user_id', userId);
+    const res = await deleteUserAccount(userId);
+    if (res.error) {
+      alert('Delete failed: ' + res.error);
+    } else {
+      setRoster((prev) => prev.filter((r) => r.profileId !== userId));
     }
+    setActionLoadingId(null);
   };
 
-  const handleApproveRequest = async (userId: string, sigId: string) => {
-    try {
-      const { error } = await supabase.from('sig_memberships').update({ status: 'APPROVED' }).eq('user_id', userId).eq('sig_id', sigId);
-      if (error) throw error;
-      await loadData();
-      toast.success('Approved.');
-    } catch (err: any) { toast.error(err.message); }
+  const handleExportCSV = () => {
+    const headers = ['Full Name', 'Roll Number', 'Semester', 'Domain', 'Role', 'Progress'];
+    const rows = roster.map((r) => [
+      r.fullName,
+      r.rollNumber,
+      r.semester || 'N/A',
+      r.sigName || 'Unassigned',
+      r.globalRole === 'CHAIR' ? 'Chair' : r.sigRole || 'Member',
+      `${r.progressPercent}% (${r.completedSubtasks}/${r.totalSubtasks})`
+    ]);
+    const csvContent =
+      'data:text/csv;charset=utf-8,' +
+      [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+    const encoded = encodeURI(csvContent);
+    const a = document.createElement('a');
+    a.setAttribute('href', encoded);
+    a.setAttribute('download', 'acm_roster.csv');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
-  const handleRejectRequest = async (userId: string, sigId: string) => {
-    try {
-      const { error } = await supabase.from('sig_memberships').delete().eq('user_id', userId).eq('sig_id', sigId);
-      if (error) throw error;
-      await loadData();
-      toast.success('Rejected.');
-    } catch (err: any) { toast.error(err.message); }
-  };
-
-  const handleTransferLeadership = async () => {
-    if (!successorId || !currentUserId) return;
-    setIsTransferring(true);
-    try {
-      const { error } = await supabase.rpc('transfer_leadership', { new_chair_id: successorId });
-      if (error) throw error;
-      toast.success('Succession complete.');
-      window.location.href = '/dashboard/member';
-    } catch (err: any) { toast.error(err.message); setIsTransferring(false); }
-  };
-
-  const toggleSigExpanded = (sigId: string) => { setExpandedSigs(prev => ({ ...prev, [sigId]: !prev[sigId] })); };
-  
-  const filteredRoster = useMemo(() => roster.filter((m) => m.fullName.toLowerCase().includes(searchQuery.toLowerCase()) || m.rollNumber.toLowerCase().includes(searchQuery.toLowerCase()) || (m.sigName && m.sigName.toLowerCase().includes(searchQuery.toLowerCase()))), [roster, searchQuery]);
-  const viewingMember = roster.find((m) => m.profileId === viewingMemberId);
-  const viewingMemberTasks = useMemo(() => { return allGlobalTasks.filter((t) => t.assigned_to === viewingMemberId); }, [allGlobalTasks, viewingMemberId]);
-
-  if (loading) return <div className="flex items-center justify-center min-h-[50vh] text-zinc-500 text-sm font-medium">Loading chapter analytics...</div>;
-
-  if (authErrorMsg) return (
-    <div className="max-w-md mx-auto my-16 p-8 bg-zinc-900 border border-zinc-800 rounded-xl text-center space-y-4">
-      <div className="w-12 h-12 bg-red-500/10 border border-red-500/20 rounded-lg flex items-center justify-center mx-auto text-red-400"><AlertTriangle className="h-6 w-6" /></div>
-      <h3 className="text-lg font-semibold text-zinc-100">Access Denied</h3><p className="text-sm text-zinc-400">{authErrorMsg}</p>
-      <div className="pt-4 flex gap-3 justify-center">
-        <button onClick={() => router.push('/dashboard/member')} className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-100 rounded-md text-sm font-medium transition-colors">Return</button>
-      </div>
-    </div>
+  // Filtered Roster
+  const filteredRoster = roster.filter(
+    (m) =>
+      m.fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      m.rollNumber.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (m.sigName || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const totalMembers = roster.filter((r) => r.globalRole !== 'CHAIR').length;
+  const leadCount = roster.filter((r) => r.sigRole === 'LEAD').length;
+
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 pb-6 border-b border-zinc-800/60">
+    <div className="space-y-6">
+      {/* EXECUTIVE HEADER & PILL TABS */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-blue-950/60 pb-6">
         <div>
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-zinc-900 border border-zinc-800 text-zinc-400 mb-3">
-            <ShieldCheck className="h-3.5 w-3.5 text-blue-500" /> Executive Suite
-          </div>
-          <h2 className="text-3xl font-semibold text-zinc-100 tracking-tight">Chapter Overview</h2>
-          <p className="text-sm text-zinc-500 mt-1">Manage domains, oversee progress, and configure chapter roles.</p>
+          <h1 className="text-xl font-bold tracking-tight text-white">Executive Suite</h1>
+          <p className="text-xs text-zinc-400 mt-0.5">
+            Club-wide governance, domain operations, and milestone tracking.
+          </p>
         </div>
 
-        <div className="flex bg-zinc-900/50 p-1 rounded-lg border border-zinc-800/50">
-          {[
-            { id: 'overview', label: 'Overview' },
-            { id: 'admin', label: 'Roster' },
-            { id: 'requests', label: 'Requests', count: pendingRequests.length },
-            { id: 'personal', label: 'My Tasks', count: myTasks.length }
-          ].map(tab => (
-            <button 
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as any)} 
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors flex items-center gap-2 ${activeTab === tab.id ? 'bg-zinc-800 text-zinc-100 shadow-sm' : 'text-zinc-400 hover:text-zinc-200'}`}
-            >
-              {tab.label}
-              {!!tab.count && <span className="bg-blue-600/20 text-blue-400 text-[10px] px-1.5 py-0.5 rounded-md">{tab.count}</span>}
-            </button>
-          ))}
+        <div className="flex items-center gap-1 bg-[#0c1222] border border-blue-950/80 p-1.5 rounded-xl shadow-md">
+          <button
+            onClick={() => setActiveTab('overview')}
+            className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+              activeTab === 'overview'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Executive Overview
+          </button>
+          <button
+            onClick={() => setActiveTab('roster')}
+            className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+              activeTab === 'roster'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            Roster &amp; Roles
+          </button>
+          <button
+            onClick={() => setActiveTab('requests')}
+            className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
+              activeTab === 'requests'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <span>Requests</span>
+            {requests.length > 0 && (
+              <span className="bg-amber-500 text-amber-950 text-[10px] px-1.5 py-0.2 rounded-full font-bold">
+                {requests.length}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('sig-details')}
+            className={`px-4 py-2 rounded-lg text-xs font-semibold transition-all ${
+              activeTab === 'sig-details'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            SIG Progress
+          </button>
         </div>
       </div>
 
-      {activeTab === 'overview' && (
-        <div className="space-y-8">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="bg-zinc-900 border border-zinc-800/60 p-6 rounded-xl">
-              <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2">Active Domains</p>
-              <p className="text-3xl font-semibold text-zinc-100">{clubTotals.sigsCount}</p>
-            </div>
-            <div className="bg-zinc-900 border border-zinc-800/60 p-6 rounded-xl">
-              <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2">Milestones Complete</p>
-              <p className="text-3xl font-semibold text-zinc-100">{clubTotals.subtasksDone} <span className="text-lg text-zinc-600">/ {clubTotals.subtasksTotal}</span></p>
-            </div>
-            <div className="bg-zinc-900 border border-zinc-800/60 p-6 rounded-xl">
-              <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-2">Verified Members</p>
-              <p className="text-3xl font-semibold text-zinc-100">{clubTotals.totalMemberships}</p>
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-            {sigStats.map((sig) => {
-              const sigMembers = roster.filter(m => m.sigId === sig.id);
-              const isExpanded = expandedSigs[sig.id] || false;
-
-              return (
-                <div key={sig.id} className="bg-zinc-900 border border-zinc-800/60 rounded-xl p-6 transition flex flex-col space-y-4">
-                  <div>
-                    <div className="flex justify-between items-end mb-4">
-                      <h4 className="text-lg font-semibold text-zinc-100">{sig.name}</h4>
-                      <span className="text-lg font-medium text-zinc-300">{sig.completionRate}%</span>
-                    </div>
-                    <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden mb-3">
-                      <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-300" style={{ width: `${sig.completionRate}%` }} />
-                    </div>
-                    <div className="flex justify-between items-center text-xs text-zinc-500 font-medium">
-                      <span>{sig.memberCount} members</span>
-                      <span>{sig.completedSubtasks} / {sig.totalSubtasks} milestones</span>
-                    </div>
-                  </div>
-                  
-                  {sigMembers.length > 0 && (
-                    <button onClick={() => toggleSigExpanded(sig.id)} className="flex items-center justify-between w-full p-3 mt-2 bg-zinc-800/30 hover:bg-zinc-800/60 border border-zinc-800/50 rounded-lg transition text-xs font-medium text-zinc-300">
-                      <span>View Domain Roster</span>
-                      {isExpanded ? <ChevronUp className="h-4 w-4 text-zinc-500" /> : <ChevronDown className="h-4 w-4 text-zinc-500" />}
-                    </button>
-                  )}
-
-                  {isExpanded && sigMembers.length > 0 && (
-                    <div className="pt-2 flex-1 overflow-y-auto pr-1 space-y-2 max-h-[300px]">
-                      {sigMembers.map(m => (
-                        <div key={m.profileId} className="flex items-center justify-between gap-3 bg-zinc-950/40 p-3 rounded-lg border border-zinc-800/40">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="text-sm font-medium text-zinc-200 truncate">{m.fullName}</span>
-                              {m.sigRole === 'LEAD' && <span className="text-[10px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/20 font-medium">Lead</span>}
-                            </div>
-                            <div className="flex items-center gap-3 mt-2">
-                              <div className="flex-1 bg-zinc-800 rounded-full h-1 overflow-hidden"><div className="bg-zinc-400 h-1 rounded-full" style={{ width: `${m.percent}%` }} /></div>
-                              <span className="text-[10px] text-zinc-500 font-medium w-8 text-right">{m.percent}%</span>
-                            </div>
-                          </div>
-                          <button onClick={() => setViewingMemberId(m.profileId)} className="p-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-100 rounded-md transition border border-zinc-700/50" title="View Detailed Tasks">
-                            <Eye className="h-4 w-4" />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+      {loading ? (
+        <div className="py-20 text-center">
+          <Loader2 className="h-6 w-6 animate-spin text-blue-500 mx-auto" />
         </div>
-      )}
-
-      {activeTab === 'requests' && (
-        <div className="bg-zinc-900 border border-zinc-800/60 rounded-xl overflow-hidden">
-          <div className="p-5 border-b border-zinc-800/60">
-            <h3 className="font-semibold text-zinc-100 text-sm">Global Pending Requests</h3>
-          </div>
-          {pendingRequests.length === 0 ? (
-            <div className="p-10 text-center text-zinc-500 text-sm">No pending enrollment requests.</div>
-          ) : (
-            <div className="divide-y divide-zinc-800/60">
-              {pendingRequests.map((req) => (
-                <div key={`${req.profileId}-${req.sigId}`} className="p-5 flex justify-between items-center hover:bg-zinc-800/20">
-                  <div>
-                    <p className="text-sm font-medium text-zinc-200">{req.fullName}</p>
-                    <p className="text-xs text-zinc-500 mt-1">{req.rollNumber} • Sem {req.semester} • <span className="text-zinc-300 font-medium">{req.sigName}</span></p>
+      ) : (
+        <>
+          {/* ================= TAB 1: EXECUTIVE OVERVIEW ================= */}
+          {activeTab === 'overview' && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-5 shadow-lg">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
+                      <Users className="h-5 w-5" />
+                    </div>
+                    <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
+                      Total Members
+                    </span>
                   </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => handleRejectRequest(req.profileId, req.sigId!)} className="px-3 py-1.5 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 rounded-md transition text-xs font-medium">Reject</button>
-                    <button onClick={() => handleApproveRequest(req.profileId, req.sigId!)} className="px-3 py-1.5 bg-zinc-100 hover:bg-white text-zinc-900 rounded-md text-xs font-medium transition shadow-sm">Approve</button>
-                  </div>
+                  <p className="text-3xl font-bold text-white">{totalMembers}</p>
                 </div>
-              ))}
+
+                <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-5 shadow-lg">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 bg-amber-500/10 rounded-lg text-amber-400">
+                      <Clock className="h-5 w-5" />
+                    </div>
+                    <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
+                      Pending Requests
+                    </span>
+                  </div>
+                  <p className="text-3xl font-bold text-white">{requests.length}</p>
+                </div>
+
+                <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-5 shadow-lg">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 bg-green-500/10 rounded-lg text-green-400">
+                      <ShieldCheck className="h-5 w-5" />
+                    </div>
+                    <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
+                      Domain Leads
+                    </span>
+                  </div>
+                  <p className="text-3xl font-bold text-white">{leadCount}</p>
+                </div>
+
+                <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-5 shadow-lg">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="p-2 bg-purple-500/10 rounded-lg text-purple-400">
+                      <Activity className="h-5 w-5" />
+                    </div>
+                    <span className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
+                      Chapter Status
+                    </span>
+                  </div>
+                  <p className="text-2xl font-bold text-green-400 mt-1">Operational</p>
+                </div>
+              </div>
+
+              {/* SIG Health Distribution Cards */}
+              <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-6 shadow-lg">
+                <h3 className="text-sm font-semibold text-zinc-200 mb-5">
+                  SIG Distribution &amp; Workload Health
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                  {sigStats.map((st) => (
+                    <div key={st.id} className="space-y-1.5">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-zinc-300 font-medium">{st.name}</span>
+                        <span className="text-zinc-500">{st.memberCount} members</span>
+                      </div>
+                      <div className="h-2 w-full bg-zinc-800/80 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                          style={{
+                            width: `${
+                              totalMembers > 0
+                                ? Math.round((st.memberCount / totalMembers) * 100)
+                                : 0
+                            }%`
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           )}
-        </div>
-      )}
 
-      {activeTab === 'admin' && (
-        <div className="space-y-6">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-            <div className="relative w-full sm:w-72">
-              <Search className="absolute left-3 top-2.5 h-4 w-4 text-zinc-500" />
-              <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Search member, roll number, domain..." className="w-full bg-zinc-900 border border-zinc-800 rounded-lg pl-9 pr-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-700 transition" />
-            </div>
-          </div>
-
-          <div className="bg-zinc-900 border border-zinc-800/60 rounded-xl overflow-hidden shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm whitespace-nowrap">
-                <thead>
-                  <tr className="border-b border-zinc-800/60 bg-zinc-950/30 text-zinc-500 text-xs font-medium uppercase tracking-wide">
-                    <th className="px-5 py-4">Member Info</th>
-                    <th className="px-5 py-4">Sem</th>
-                    <th className="px-5 py-4">Assigned Domain</th>
-                    <th className="px-5 py-4">Role</th>
-                    <th className="px-5 py-4">Progress</th>
-                    <th className="px-5 py-4 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-zinc-800/60">
-                  {filteredRoster.map((m) => (
-                    <tr key={m.profileId} className="hover:bg-zinc-800/20 transition-colors">
-                      <td className="px-5 py-4">
-                        <div className="font-medium text-zinc-200 flex items-center gap-2">
-                          {m.fullName}
-                          {m.globalRole === 'CHAIR' && <span className="text-[10px] bg-blue-500/10 border border-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-medium">Chair</span>}
-                        </div>
-                        <div className="text-xs text-zinc-500 mt-1 uppercase">{m.rollNumber}</div>
-                      </td>
-                      <td className="px-5 py-4 text-zinc-400">{m.semester}</td>
-                      <td className="px-5 py-4">
-                        <select disabled={updatingId === m.profileId || m.globalRole === 'CHAIR'} value={m.sigId || ''} onChange={(e) => handleUpdateMembership(m.profileId, e.target.value, m.sigRole || 'MEMBER', m.semester || 'N/A')} className="bg-zinc-950 border border-zinc-800 text-zinc-300 rounded-md px-3 py-1.5 text-xs outline-none focus:border-zinc-600 w-full disabled:opacity-50">
-                          <option value="" disabled>Select Domain</option>
-                          {sigs.map((s) => (<option key={s.id} value={s.id}>{s.name}</option>))}
-                        </select>
-                      </td>
-                      <td className="px-5 py-4">
-                        <select disabled={updatingId === m.profileId || !m.sigId || m.globalRole === 'CHAIR'} value={m.sigRole || 'MEMBER'} onChange={(e) => handleUpdateMembership(m.profileId, m.sigId!, e.target.value as any, m.semester || 'N/A')} className="bg-zinc-950 border border-zinc-800 text-zinc-300 rounded-md px-3 py-1.5 text-xs outline-none focus:border-zinc-600 w-full disabled:opacity-50">
-                          <option value="MEMBER">Member</option><option value="CO_LEAD">Co-Lead</option><option value="LEAD">Lead</option>
-                        </select>
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="w-24 bg-zinc-800 rounded-full h-1 overflow-hidden mb-1.5"><div className="bg-zinc-400 h-1 rounded-full" style={{ width: `${m.percent}%` }} /></div>
-                        <span className="text-[10px] text-zinc-500 font-medium">{m.percent}% ({m.completedTasks}/{m.totalTasks})</span>
-                      </td>
-                      <td className="px-5 py-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
-                          {m.sigId && m.globalRole !== 'CHAIR' && (
-                            <button onClick={() => handleRemoveMember(m.profileId, m.sigId!)} className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-md transition" title="Remove Member">
-                              <UserMinus className="h-4 w-4" />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="bg-zinc-900 border border-red-900/30 rounded-xl p-6">
-            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-              <div>
-                <h3 className="text-sm font-semibold text-red-400">Chapter Succession</h3>
-                <p className="text-xs text-zinc-500 mt-1">Transfer the Chapter Chair role. You will immediately lose access to this suite.</p>
-              </div>
-              <button onClick={() => setShowSuccessionModal(true)} className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-md text-xs font-semibold transition border border-red-500/20">
-                Appoint Successor
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'personal' && (
-        <div className="space-y-6">
-          <div className="bg-zinc-900 border border-zinc-800/60 rounded-xl p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h3 className="text-base font-semibold text-zinc-100">Chair Executive Tasks</h3>
-              <span className="text-lg font-medium text-blue-500">{chairPersonalStats.percent}%</span>
-            </div>
-            <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden"><div className="bg-blue-500 h-1.5 rounded-full transition-all" style={{ width: `${chairPersonalStats.percent}%` }} /></div>
-          </div>
-          <div className="grid gap-4">
-            {myTasks.map((task) => (
-              <div key={task.id} className="bg-zinc-900 border border-zinc-800/60 rounded-xl p-5">
-                <h4 className="text-sm font-medium text-zinc-100">{task.title}</h4>
-                <div className="space-y-2 mt-4">
-                  {task.subtasks.map((st) => (
-                    <button key={st.id} onClick={() => toggleSubtask(task.id, st.id, st.is_completed)} className="w-full flex items-center gap-3 text-left p-2 -mx-2 rounded-lg hover:bg-zinc-800/50 transition">
-                      {st.is_completed ? <CheckCircle2 className="h-4 w-4 text-blue-500 shrink-0" /> : <Circle className="h-4 w-4 text-zinc-600 shrink-0" />}
-                      <span className={`text-sm ${st.is_completed ? 'line-through text-zinc-500' : 'text-zinc-300'}`}>{st.title}</span>
-                    </button>
-                  ))}
+          {/* ================= TAB 2: MASTER ROSTER & ROLES ================= */}
+          {activeTab === 'roster' && (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <h2 className="text-base font-semibold text-white">
+                  Master Chapter Roster (First-Come, First-Placed)
+                </h2>
+                <div className="flex items-center gap-2">
+                  <div className="relative w-full sm:w-80">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+                    <input
+                      type="text"
+                      placeholder="Search member, roll number, domain..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 bg-[#0c1222]/80 border border-blue-950/70 rounded-lg text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-blue-800 transition-colors"
+                    />
+                  </div>
+                  <button
+                    onClick={handleExportCSV}
+                    className="p-2.5 bg-[#0c1222] hover:bg-zinc-900 border border-blue-950/80 rounded-lg text-zinc-300 transition-colors"
+                    title="Export CSV"
+                  >
+                    <Download className="h-4 w-4 text-blue-400" />
+                  </button>
                 </div>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
 
-      {/* MEMBER DETAILED PROGRESS MODAL */}
-      {viewingMemberId && viewingMember && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0a0a0a]/80 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-2xl w-full p-6 shadow-2xl max-h-[85vh] overflow-y-auto space-y-6">
-            <div className="flex justify-between items-start">
-              <div>
-                <h3 className="text-lg font-semibold text-zinc-100">Review: {viewingMember.fullName}</h3>
-                <p className="text-sm text-zinc-500 mt-1 uppercase">{viewingMember.rollNumber} • {viewingMember.sigName} ({viewingMember.sigRole})</p>
+              <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl overflow-hidden shadow-lg shadow-black/20">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm whitespace-nowrap">
+                    <thead className="bg-[#070b14]/80 border-b border-blue-950/70 text-xs text-zinc-500 font-semibold uppercase tracking-wider">
+                      <tr>
+                        <th className="px-6 py-4">Member Info</th>
+                        <th className="px-6 py-4">Sem</th>
+                        <th className="px-6 py-4">Assigned Domain</th>
+                        <th className="px-6 py-4">Role</th>
+                        <th className="px-6 py-4">Progress</th>
+                        <th className="px-6 py-4 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-blue-950/40">
+                      {filteredRoster.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-6 py-12 text-center text-zinc-500">
+                            No members found.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredRoster.map((member) => {
+                          const isChair = member.globalRole === 'CHAIR';
+                          const isBusy = actionLoadingId === member.profileId;
+
+                          return (
+                            <tr
+                              key={member.profileId}
+                              className="hover:bg-blue-950/10 transition-colors"
+                            >
+                              <td className="px-6 py-4">
+                                <div className="flex flex-col gap-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium text-zinc-200">
+                                      {member.fullName}
+                                    </span>
+                                    {isChair && (
+                                      <span className="px-1.5 py-0.5 rounded bg-blue-600/20 border border-blue-500/30 text-[10px] font-medium text-blue-400">
+                                        Chair
+                                      </span>
+                                    )}
+                                  </div>
+                                  <span className="text-xs text-zinc-500 uppercase tracking-wide">
+                                    {member.rollNumber}
+                                  </span>
+                                </div>
+                              </td>
+
+                              <td className="px-6 py-4 text-zinc-400">{member.semester}</td>
+
+                              <td className="px-6 py-4">
+                                {isChair ? (
+                                  <span className="text-xs text-zinc-500 font-mono">
+                                    Executive Authority
+                                  </span>
+                                ) : (
+                                  <select
+                                    disabled={isBusy}
+                                    value={member.sigId || ''}
+                                    onChange={(e) =>
+                                      handleAssignDomain(member.profileId, e.target.value)
+                                    }
+                                    className="bg-[#070b14] border border-blue-950/70 rounded-md px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-blue-700 disabled:opacity-50 transition-colors"
+                                  >
+                                    <option value="">Select Domain</option>
+                                    {sigs.map((s) => (
+                                      <option key={s.id} value={s.id}>
+                                        {s.name}
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+                              </td>
+
+                              <td className="px-6 py-4">
+                                {isChair ? (
+                                  <span className="text-xs text-zinc-500 font-mono">Chair</span>
+                                ) : (
+                                  <select
+                                    disabled={isBusy || !member.sigId}
+                                    value={member.sigRole}
+                                    onChange={(e) =>
+                                      handleSigRoleChange(
+                                        member.profileId,
+                                        member.sigId,
+                                        e.target.value as 'MEMBER' | 'LEAD'
+                                      )
+                                    }
+                                    className="bg-[#070b14] border border-blue-950/70 rounded-md px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-blue-700 disabled:opacity-50 transition-colors"
+                                  >
+                                    <option value="MEMBER">Member</option>
+                                    <option value="LEAD">Lead</option>
+                                  </select>
+                                )}
+                              </td>
+
+                              <td className="px-6 py-4">
+                                {isChair ? (
+                                  <span className="text-[11px] text-zinc-600 font-mono">N/A</span>
+                                ) : (
+                                  <div className="w-32">
+                                    <div className="h-1.5 w-full bg-zinc-800/80 rounded-full overflow-hidden mb-1.5">
+                                      <div
+                                        className="h-full bg-blue-500 rounded-full"
+                                        style={{ width: `${member.progressPercent}%` }}
+                                      />
+                                    </div>
+                                    <span className="text-[11px] text-zinc-500">
+                                      {member.progressPercent}% ({member.completedSubtasks}/
+                                      {member.totalSubtasks})
+                                    </span>
+                                  </div>
+                                )}
+                              </td>
+
+                              <td className="px-6 py-4 text-right">
+                                {!isChair ? (
+                                  <div className="flex items-center justify-end gap-2">
+                                    {member.sigId && (
+                                      <button
+                                        onClick={() =>
+                                          handleRemoveFromDomain(
+                                            member.profileId,
+                                            member.fullName
+                                          )
+                                        }
+                                        disabled={isBusy}
+                                        className="p-1.5 text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10 rounded-md transition-colors"
+                                        title="Remove from Domain"
+                                      >
+                                        <UserMinus className="h-4 w-4" />
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() =>
+                                        handleDeleteUserAccount(
+                                          member.profileId,
+                                          member.fullName
+                                        )
+                                      }
+                                      disabled={isBusy}
+                                      className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-md transition-colors inline-flex items-center justify-center disabled:opacity-50"
+                                      title="Permanently Delete Account"
+                                    >
+                                      {isBusy ? (
+                                        <Loader2 className="h-4 w-4 animate-spin text-red-400" />
+                                      ) : (
+                                        <Trash2 className="h-4 w-4" />
+                                      )}
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-zinc-600 font-mono pr-2">
+                                    PROTECTED
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-              <button onClick={() => setViewingMemberId(null)} className="p-1.5 text-zinc-500 hover:text-zinc-100 bg-zinc-800/50 hover:bg-zinc-800 rounded-md transition"><X className="h-4 w-4" /></button>
             </div>
+          )}
 
-            <div className="bg-zinc-950/50 p-5 rounded-lg border border-zinc-800/50">
-              <div className="flex justify-between items-center mb-3">
-                <span className="text-sm font-medium text-zinc-300">Completion</span>
-                <span className="text-base font-semibold text-zinc-100">{viewingMember.percent}%</span>
-              </div>
-              <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden"><div className="bg-blue-500 h-1.5 rounded-full" style={{ width: `${viewingMember.percent}%` }} /></div>
-              <p className="text-xs text-zinc-500 mt-3">{viewingMember.completedTasks} of {viewingMember.totalTasks} milestones completed.</p>
-            </div>
-
+          {/* ================= TAB 3: PENDING REQUESTS ================= */}
+          {activeTab === 'requests' && (
             <div className="space-y-4">
-              <h4 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Assigned Deliverables</h4>
-              {viewingMemberTasks.length === 0 ? (
-                <div className="text-center text-zinc-600 text-sm py-6">No tasks assigned.</div>
-              ) : (
-                viewingMemberTasks.map(task => {
-                   const cCount = task.subtasks.filter((st) => st.is_completed).length;
-                   const tCount = task.subtasks.length;
-                   const tPercent = tCount > 0 ? Math.round((cCount / tCount) * 100) : 0;
-                   return (
-                     <div key={task.id} className="bg-zinc-950/30 border border-zinc-800/50 rounded-lg p-5 space-y-4">
-                        <div className="flex justify-between items-start">
-                          <div>
-                            <h5 className="text-sm font-medium text-zinc-200">{task.title}</h5>
-                            <span className="text-[10px] text-zinc-500 mt-1 block">Due: {task.due_date}</span>
-                          </div>
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-medium border ${task.priority === 'HIGH' ? 'bg-red-500/10 border-red-500/20 text-red-400' : task.priority === 'MEDIUM' ? 'bg-yellow-500/10 border-yellow-500/20 text-yellow-400' : 'bg-zinc-800 border-zinc-700 text-zinc-400'}`}>{task.priority}</span>
-                        </div>
-                        
+              <h2 className="text-base font-semibold text-white">
+                Domain Join Requests (Pending Approval)
+              </h2>
+              <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl overflow-hidden shadow-lg">
+                {requests.length === 0 ? (
+                  <div className="p-12 text-center text-zinc-500 text-sm">
+                    No pending domain requests. All clear!
+                  </div>
+                ) : (
+                  <div className="divide-y divide-blue-950/40">
+                    {requests.map((req) => (
+                      <div
+                        key={req.id}
+                        className="p-5 flex items-center justify-between gap-4"
+                      >
                         <div>
-                          <div className="flex justify-between text-[10px] text-zinc-500 mb-1.5">
-                            <span>Progress</span>
-                            <span>{tPercent}%</span>
-                          </div>
-                          <div className="w-full bg-zinc-800 rounded-full h-1 overflow-hidden"><div className="bg-zinc-400 h-1 rounded-full" style={{ width: `${tPercent}%` }} /></div>
+                          <p className="font-medium text-zinc-200 text-sm">{req.fullName}</p>
+                          <p className="text-xs text-zinc-500 uppercase">
+                            {req.rollNumber} • Sem {req.semester} • Requesting{' '}
+                            <span className="text-amber-400 font-medium">{req.sigName}</span>
+                          </p>
                         </div>
-
-                        <div className="space-y-2 pt-3 border-t border-zinc-800/60">
-                          {task.subtasks.map(st => (
-                            <div key={st.id} className="flex items-center gap-2.5 text-sm">
-                              {st.is_completed ? <CheckCircle2 className="h-4 w-4 text-blue-500 shrink-0" /> : <Circle className="h-4 w-4 text-zinc-600 shrink-0" />}
-                              <span className={st.is_completed ? 'text-zinc-600 line-through' : 'text-zinc-300'}>{st.title}</span>
-                            </div>
-                          ))}
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => handleRejectRequest(req)}
+                            disabled={actionLoadingId === req.userId}
+                            className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-300 text-xs rounded-lg transition-colors flex items-center gap-1"
+                          >
+                            <X className="h-3.5 w-3.5 text-red-400" />
+                            <span>Reject</span>
+                          </button>
+                          <button
+                            onClick={() => handleApproveRequest(req)}
+                            disabled={actionLoadingId === req.userId}
+                            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1"
+                          >
+                            {actionLoadingId === req.userId ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <Check className="h-3.5 w-3.5" />
+                            )}
+                            <span>Approve Request</span>
+                          </button>
                         </div>
-                     </div>
-                   );
-                })
-              )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          )}
 
-      {/* SUCCESSION MODAL */}
-      {showSuccessionModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0a0a0a]/80 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-sm w-full p-6 space-y-5">
-            <h3 className="text-lg font-semibold text-zinc-100">Transfer Leadership</h3>
-            <p className="text-sm text-zinc-400">Select the next Chapter Chair. You will be demoted to a standard Member upon confirmation.</p>
-            <div>
-              <select value={successorId} onChange={(e) => setSuccessorId(e.target.value)} className="w-full bg-zinc-950 border border-zinc-800 text-zinc-200 rounded-md px-3 py-2 text-sm outline-none focus:border-zinc-600">
-                <option value="" disabled>Choose a member...</option>
-                {roster.filter(m => m.profileId !== currentUserId).map(m => (
-                  <option key={m.profileId} value={m.profileId}>{m.fullName} ({m.rollNumber})</option>
+          {/* ================= TAB 4: DETAILED SIG OVERVIEW ================= */}
+          {activeTab === 'sig-details' && (
+            <div className="space-y-6">
+              <div className="flex gap-2 border-b border-zinc-800 pb-4 overflow-x-auto">
+                {sigs.map((sig) => (
+                  <button
+                    key={sig.id}
+                    onClick={() => setSelectedSigTab(sig.name)}
+                    className={`px-4 py-2 rounded-lg text-xs font-medium whitespace-nowrap transition-colors ${
+                      selectedSigTab === sig.name
+                        ? 'bg-blue-600/20 text-blue-400 border border-blue-500/30'
+                        : 'bg-[#0c1222] text-zinc-400 hover:text-zinc-200 border border-zinc-800'
+                    }`}
+                  >
+                    {sig.name} ({roster.filter((m) => m.sigName === sig.name).length})
+                  </button>
                 ))}
-              </select>
+              </div>
+
+              <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl overflow-hidden shadow-lg">
+                <div className="p-5 border-b border-blue-950/70 flex items-center justify-between">
+                  <div>
+                    <h3 className="font-semibold text-white text-base">
+                      {selectedSigTab} Roster &amp; Member Progress
+                    </h3>
+                    <p className="text-xs text-zinc-400 mt-0.5">
+                      Detailed task completion and milestone tracking for assigned members.
+                    </p>
+                  </div>
+                  <span className="text-xs bg-blue-500/10 text-blue-400 border border-blue-500/20 px-3 py-1 rounded-full font-medium">
+                    {roster.filter((m) => m.sigName === selectedSigTab).length} Active Members
+                  </span>
+                </div>
+
+                <div className="divide-y divide-blue-950/40">
+                  {roster.filter((m) => m.sigName === selectedSigTab).length === 0 ? (
+                    <div className="p-12 text-center text-zinc-500 text-sm">
+                      No members currently enrolled in {selectedSigTab}.
+                    </div>
+                  ) : (
+                    roster
+                      .filter((m) => m.sigName === selectedSigTab)
+                      .map((m) => (
+                        <div
+                          key={m.profileId}
+                          className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:bg-blue-950/10 transition-colors"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="h-10 w-10 rounded-xl bg-blue-600/10 border border-blue-500/20 flex items-center justify-center text-blue-400 font-semibold text-sm">
+                              {m.fullName ? m.fullName.substring(0, 2).toUpperCase() : 'U'}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium text-zinc-200 text-sm">
+                                  {m.fullName}
+                                </span>
+                                {m.sigRole === 'LEAD' && (
+                                  <span className="px-1.5 py-0.2 rounded bg-green-500/20 text-green-400 text-[10px] font-bold">
+                                    LEAD
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-xs text-zinc-500 uppercase tracking-wide">
+                                {m.rollNumber} • Sem {m.semester}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="w-full sm:w-64">
+                            <div className="flex justify-between text-xs mb-1.5">
+                              <span className="text-zinc-400">Milestone Progress</span>
+                              <span className="text-blue-400 font-medium">
+                                {m.progressPercent}% ({m.completedSubtasks}/{m.totalSubtasks})
+                              </span>
+                            </div>
+                            <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-blue-500 rounded-full"
+                                style={{ width: `${m.progressPercent}%` }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </div>
             </div>
-            <div className="flex gap-3 justify-end pt-2">
-              <button onClick={() => setShowSuccessionModal(false)} className="px-4 py-2 text-zinc-400 hover:text-zinc-200 text-sm font-medium transition">Cancel</button>
-              <button onClick={handleTransferLeadership} disabled={!successorId || isTransferring} className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded-md text-sm font-medium transition shadow-sm">
-                {isTransferring ? 'Transferring...' : 'Confirm Transfer'}
-              </button>
-            </div>
-          </div>
-        </div>
+          )}
+        </>
       )}
     </div>
   );
