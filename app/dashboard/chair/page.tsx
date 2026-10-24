@@ -356,17 +356,23 @@ function PendingRequestRow({ member, onUpdated }: { member: Profile, onUpdated: 
 
   const handleApprove = async () => {
     setProcessing(true);
-    // Approving sets status to APPROVED so they appear in the active roster
-    await supabase.from('profiles').update({ status: 'APPROVED' }).eq('id', member.id);
-    onUpdated(member.id, { status: 'APPROVED' });
+    const { error } = await supabase.from('profiles').update({ status: 'APPROVED' }).eq('id', member.id);
+    if (error) {
+      alert('Error approving request: ' + error.message);
+    } else {
+      onUpdated(member.id, { status: 'APPROVED' });
+    }
     setProcessing(false);
   };
 
   const handleReject = async () => {
     setProcessing(true);
-    // Rejecting clears their domain request and resets status
-    await supabase.from('profiles').update({ status: 'APPROVED', domain: null }).eq('id', member.id);
-    onUpdated(member.id, { status: 'APPROVED', domain: null });
+    const { error } = await supabase.from('profiles').update({ status: 'APPROVED', domain: null }).eq('id', member.id);
+    if (error) {
+      alert('Error rejecting request: ' + error.message);
+    } else {
+      onUpdated(member.id, { status: 'APPROVED', domain: null });
+    }
     setProcessing(false);
   };
 
@@ -420,15 +426,35 @@ function MemberRow({ member, onDeleted }: { member: Profile, onDeleted: (id: str
 
   const handleDomainChange = async (newDomain: string) => {
     setIsUpdating(true);
+    const previousDomain = domain;
     setDomain(newDomain);
-    await supabase.from('profiles').update({ domain: newDomain === '' ? null : newDomain, status: 'APPROVED' }).eq('id', member.id);
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ domain: newDomain === '' ? null : newDomain, status: 'APPROVED' })
+      .eq('id', member.id);
+
+    if (error) {
+      alert('Failed to update domain: ' + error.message);
+      setDomain(previousDomain);
+    }
     setIsUpdating(false);
   };
 
   const handleRoleChange = async (newRole: string) => {
     setIsUpdating(true);
+    const previousRole = role;
     setRole(newRole);
-    await supabase.from('profiles').update({ global_role: newRole }).eq('id', member.id);
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ global_role: newRole })
+      .eq('id', member.id);
+
+    if (error) {
+      alert('Failed to update role: ' + error.message);
+      setRole(previousRole);
+    }
     setIsUpdating(false);
   };
 
@@ -501,7 +527,11 @@ function MemberRow({ member, onDeleted }: { member: Profile, onDeleted: (id: str
             className="p-2 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors inline-flex items-center justify-center disabled:opacity-50"
             title="Permanently Delete Account"
           >
-            {isDeleting ? <Loader2 className="h-4 w-4 animate-spin text-red-400" /> : <Trash2 className="h-4 w-4" />}
+            {isDeleting ? (
+              <Loader2 className="h-4 w-4 animate-spin text-red-400" />
+            ) : (
+              <Trash2 className="h-4 w-4" />
+            )}
           </button>
         ) : (
           <span className="text-[10px] text-zinc-600 font-mono pr-2">PROTECTED</span>
