@@ -96,7 +96,9 @@ export default function ChairDashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
-  // Succession Modal State
+  // Succession Block & Modal State
+  const [successionSearch, setSuccessionSearch] = useState('');
+  const [showSuccessionDropdown, setShowSuccessionDropdown] = useState(false);
   const [successorCandidate, setSuccessorCandidate] = useState<ChapterMember | null>(null);
   const [successionConfirmText, setSuccessionConfirmText] = useState('');
   const [transferringSuccession, setTransferringSuccession] = useState(false);
@@ -363,6 +365,13 @@ export default function ChairDashboard() {
       (m.sigName || '').toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const successionFiltered = roster.filter(
+    (m) =>
+      m.globalRole !== 'CHAIR' &&
+      (m.fullName.toLowerCase().includes(successionSearch.toLowerCase()) ||
+        m.rollNumber.toLowerCase().includes(successionSearch.toLowerCase()))
+  );
+
   const totalMembers = roster.filter((r) => r.globalRole !== 'CHAIR').length;
   const leadCount = roster.filter((r) => r.sigRole === 'LEAD').length;
 
@@ -517,208 +526,260 @@ export default function ChairDashboard() {
 
           {/* TAB 2: MASTER ROSTER & SUCCESSION ACTIONS */}
           {activeTab === 'roster' && (
-            <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <h2 className="text-base font-semibold text-white">
-                  Master Chapter Roster &amp; Succession Management
-                </h2>
-                <div className="flex items-center gap-2">
-                  <div className="relative w-full sm:w-80">
-                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+            <div className="space-y-6">
+              
+              {/* SUCCESSION PLANNING BLOCK */}
+              <div className="bg-gradient-to-br from-[#12100c] to-[#0c1222] border border-amber-500/30 rounded-xl p-5 shadow-lg flex flex-col md:flex-row gap-6 items-start md:items-center justify-between">
+                <div className="space-y-1 max-w-lg">
+                  <h3 className="text-base font-bold text-amber-400 flex items-center gap-2">
+                    <Crown className="h-4 w-4" />
+                    Pass Chair Authority
+                  </h3>
+                  <p className="text-xs text-amber-400/80 leading-relaxed">
+                    Select a successor to permanently transfer your executive governance. Upon confirmation, your account will instantly step down to a standard member.
+                  </p>
+                </div>
+
+                <div className="w-full md:w-80 relative">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-amber-500/50" />
                     <input
                       type="text"
-                      placeholder="Search member, roll number, domain..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2 bg-[#0c1222]/80 border border-blue-950/70 rounded-lg text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-blue-800 transition-colors"
+                      placeholder="Search member by name or roll..."
+                      value={successionSearch}
+                      onChange={(e) => {
+                        setSuccessionSearch(e.target.value);
+                        setShowSuccessionDropdown(true);
+                      }}
+                      onFocus={() => setShowSuccessionDropdown(true)}
+                      className="w-full bg-[#0a0f1c] border border-amber-500/30 rounded-lg pl-9 pr-3 py-2 text-sm text-zinc-200 placeholder-amber-700/50 focus:outline-none focus:border-amber-500 transition-colors shadow-inner"
                     />
                   </div>
-                  <button
-                    onClick={handleExportCSV}
-                    className="p-2.5 bg-[#0c1222] hover:bg-zinc-900 border border-blue-950/80 rounded-lg text-zinc-300 transition-colors"
-                    title="Export CSV"
-                  >
-                    <Download className="h-4 w-4 text-blue-400" />
-                  </button>
+
+                  {/* Succession Dropdown List */}
+                  {showSuccessionDropdown && successionSearch && (
+                    <div className="absolute z-20 w-full mt-1.5 bg-[#0c1222] border border-amber-500/40 rounded-lg shadow-2xl max-h-48 overflow-y-auto">
+                      {successionFiltered.length === 0 ? (
+                        <div className="p-3 text-xs text-zinc-500 text-center">No eligible members found.</div>
+                      ) : (
+                        successionFiltered.map(m => (
+                          <button
+                            key={m.profileId}
+                            onClick={() => {
+                              setSuccessorCandidate(m);
+                              setShowSuccessionDropdown(false);
+                              setSuccessionSearch('');
+                            }}
+                            className="w-full text-left px-3 py-2.5 text-sm hover:bg-amber-500/10 flex items-center justify-between group transition-colors border-b border-blue-950/40 last:border-0"
+                          >
+                            <div>
+                              <div className="text-zinc-200 font-medium">{m.fullName}</div>
+                              <div className="text-[10px] text-zinc-500 uppercase mt-0.5">{m.rollNumber}</div>
+                            </div>
+                            <span className="text-[10px] font-bold text-amber-500/0 group-hover:text-amber-500 transition-colors uppercase tracking-wider">
+                              Select
+                            </span>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
-              <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl overflow-hidden shadow-lg shadow-black/20">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm whitespace-nowrap">
-                    <thead className="bg-[#070b14]/80 border-b border-blue-950/70 text-xs text-zinc-500 font-semibold uppercase tracking-wider">
-                      <tr>
-                        <th className="px-6 py-4">Member Info</th>
-                        <th className="px-6 py-4">Sem</th>
-                        <th className="px-6 py-4">Assigned Domain</th>
-                        <th className="px-6 py-4">Role</th>
-                        <th className="px-6 py-4">Progress</th>
-                        <th className="px-6 py-4 text-right">Actions &amp; Succession</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-blue-950/40">
-                      {filteredRoster.length === 0 ? (
+              {/* MASTER ROSTER TABLE */}
+              <div className="space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <h2 className="text-base font-semibold text-white">
+                    Master Chapter Roster
+                  </h2>
+                  <div className="flex items-center gap-2">
+                    <div className="relative w-full sm:w-80">
+                      <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
+                      <input
+                        type="text"
+                        placeholder="Filter roster..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="w-full pl-10 pr-4 py-2 bg-[#0c1222]/80 border border-blue-950/70 rounded-lg text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-blue-800 transition-colors"
+                      />
+                    </div>
+                    <button
+                      onClick={handleExportCSV}
+                      className="p-2.5 bg-[#0c1222] hover:bg-zinc-900 border border-blue-950/80 rounded-lg text-zinc-300 transition-colors"
+                      title="Export CSV"
+                    >
+                      <Download className="h-4 w-4 text-blue-400" />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl overflow-hidden shadow-lg shadow-black/20">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm whitespace-nowrap">
+                      <thead className="bg-[#070b14]/80 border-b border-blue-950/70 text-xs text-zinc-500 font-semibold uppercase tracking-wider">
                         <tr>
-                          <td colSpan={6} className="px-6 py-12 text-center text-zinc-500">
-                            No members found.
-                          </td>
+                          <th className="px-6 py-4">Member Info</th>
+                          <th className="px-6 py-4">Sem</th>
+                          <th className="px-6 py-4">Assigned Domain</th>
+                          <th className="px-6 py-4">Role</th>
+                          <th className="px-6 py-4">Progress</th>
+                          <th className="px-6 py-4 text-right">Actions</th>
                         </tr>
-                      ) : (
-                        filteredRoster.map((member) => {
-                          const isChair = member.globalRole === 'CHAIR';
-                          const isBusy = actionLoadingId === member.profileId;
+                      </thead>
+                      <tbody className="divide-y divide-blue-950/40">
+                        {filteredRoster.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="px-6 py-12 text-center text-zinc-500">
+                              No members found.
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredRoster.map((member) => {
+                            const isChair = member.globalRole === 'CHAIR';
+                            const isBusy = actionLoadingId === member.profileId;
 
-                          return (
-                            <tr
-                              key={member.profileId}
-                              className="hover:bg-blue-950/10 transition-colors"
-                            >
-                              <td className="px-6 py-4">
-                                <div className="flex flex-col gap-1">
-                                  <div className="flex items-center gap-2">
-                                    <span className="font-medium text-zinc-200">
-                                      {member.fullName}
-                                    </span>
-                                    {isChair && (
-                                      <span className="px-1.5 py-0.5 rounded bg-blue-600/20 border border-blue-500/30 text-[10px] font-medium text-blue-400 flex items-center gap-1">
-                                        <Crown className="h-3 w-3" />
-                                        Chair
+                            return (
+                              <tr
+                                key={member.profileId}
+                                className="hover:bg-blue-950/10 transition-colors"
+                              >
+                                <td className="px-6 py-4">
+                                  <div className="flex flex-col gap-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-medium text-zinc-200">
+                                        {member.fullName}
                                       </span>
-                                    )}
-                                  </div>
-                                  <span className="text-xs text-zinc-500 uppercase tracking-wide">
-                                    {member.rollNumber}
-                                  </span>
-                                </div>
-                              </td>
-
-                              <td className="px-6 py-4 text-zinc-400">{member.semester}</td>
-
-                              <td className="px-6 py-4">
-                                {isChair ? (
-                                  <span className="text-xs text-zinc-500 font-mono">
-                                    Executive Authority
-                                  </span>
-                                ) : (
-                                  <select
-                                    disabled={isBusy}
-                                    value={member.sigId || ''}
-                                    onChange={(e) =>
-                                      handleAssignDomain(member.profileId, e.target.value)
-                                    }
-                                    className="bg-[#070b14] border border-blue-950/70 rounded-md px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-blue-700 disabled:opacity-50 transition-colors"
-                                  >
-                                    <option value="">Select Domain</option>
-                                    {sigs.map((s) => (
-                                      <option key={s.id} value={s.id}>
-                                        {s.name}
-                                      </option>
-                                    ))}
-                                  </select>
-                                )}
-                              </td>
-
-                              <td className="px-6 py-4">
-                                {isChair ? (
-                                  <span className="text-xs text-zinc-500 font-mono">Chair</span>
-                                ) : (
-                                  <select
-                                    disabled={isBusy || !member.sigId}
-                                    value={member.sigRole}
-                                    onChange={(e) =>
-                                      handleSigRoleChange(
-                                        member.profileId,
-                                        member.sigId,
-                                        e.target.value as 'MEMBER' | 'LEAD'
-                                      )
-                                    }
-                                    className="bg-[#070b14] border border-blue-950/70 rounded-md px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-blue-700 disabled:opacity-50 transition-colors"
-                                  >
-                                    <option value="MEMBER">Member</option>
-                                    <option value="LEAD">Lead</option>
-                                  </select>
-                                )}
-                              </td>
-
-                              <td className="px-6 py-4">
-                                {isChair ? (
-                                  <span className="text-[11px] text-zinc-600 font-mono">N/A</span>
-                                ) : (
-                                  <div className="w-32">
-                                    <div className="h-1.5 w-full bg-zinc-800/80 rounded-full overflow-hidden mb-1.5">
-                                      <div
-                                        className="h-full bg-blue-500 rounded-full"
-                                        style={{ width: `${member.progressPercent}%` }}
-                                      />
+                                      {isChair && (
+                                        <span className="px-1.5 py-0.5 rounded bg-blue-600/20 border border-blue-500/30 text-[10px] font-medium text-blue-400 flex items-center gap-1">
+                                          <Crown className="h-3 w-3" />
+                                          Chair
+                                        </span>
+                                      )}
                                     </div>
-                                    <span className="text-[11px] text-zinc-500">
-                                      {member.progressPercent}% ({member.completedSubtasks}/
-                                      {member.totalSubtasks})
+                                    <span className="text-xs text-zinc-500 uppercase tracking-wide">
+                                      {member.rollNumber}
                                     </span>
                                   </div>
-                                )}
-                              </td>
+                                </td>
 
-                              <td className="px-6 py-4 text-right">
-                                {!isChair ? (
-                                  <div className="flex items-center justify-end gap-2">
-                                    {/* Successor Nomination Button */}
-                                    <button
-                                      onClick={() => setSuccessorCandidate(member)}
+                                <td className="px-6 py-4 text-zinc-400">{member.semester}</td>
+
+                                <td className="px-6 py-4">
+                                  {isChair ? (
+                                    <span className="text-xs text-zinc-500 font-mono">
+                                      Executive Authority
+                                    </span>
+                                  ) : (
+                                    <select
                                       disabled={isBusy}
-                                      className="p-1.5 text-zinc-400 hover:text-amber-400 hover:bg-amber-500/10 rounded-md transition-colors flex items-center gap-1 text-xs"
-                                      title="Nominate as Chapter Chair Successor"
+                                      value={member.sigId || ''}
+                                      onChange={(e) =>
+                                        handleAssignDomain(member.profileId, e.target.value)
+                                      }
+                                      className="bg-[#070b14] border border-blue-950/70 rounded-md px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-blue-700 disabled:opacity-50 transition-colors"
                                     >
-                                      <Crown className="h-4 w-4 text-amber-400" />
-                                      <span className="hidden xl:inline text-[11px]">Pass Chair</span>
-                                    </button>
+                                      <option value="">Select Domain</option>
+                                      {sigs.map((s) => (
+                                        <option key={s.id} value={s.id}>
+                                          {s.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  )}
+                                </td>
 
-                                    {member.sigId && (
+                                <td className="px-6 py-4">
+                                  {isChair ? (
+                                    <span className="text-xs text-zinc-500 font-mono">Chair</span>
+                                  ) : (
+                                    <select
+                                      disabled={isBusy || !member.sigId}
+                                      value={member.sigRole}
+                                      onChange={(e) =>
+                                        handleSigRoleChange(
+                                          member.profileId,
+                                          member.sigId,
+                                          e.target.value as 'MEMBER' | 'LEAD'
+                                        )
+                                      }
+                                      className="bg-[#070b14] border border-blue-950/70 rounded-md px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-blue-700 disabled:opacity-50 transition-colors"
+                                    >
+                                      <option value="MEMBER">Member</option>
+                                      <option value="LEAD">Lead</option>
+                                    </select>
+                                  )}
+                                </td>
+
+                                <td className="px-6 py-4">
+                                  {isChair ? (
+                                    <span className="text-[11px] text-zinc-600 font-mono">N/A</span>
+                                  ) : (
+                                    <div className="w-32">
+                                      <div className="h-1.5 w-full bg-zinc-800/80 rounded-full overflow-hidden mb-1.5">
+                                        <div
+                                          className="h-full bg-blue-500 rounded-full"
+                                          style={{ width: `${member.progressPercent}%` }}
+                                        />
+                                      </div>
+                                      <span className="text-[11px] text-zinc-500">
+                                        {member.progressPercent}% ({member.completedSubtasks}/
+                                        {member.totalSubtasks})
+                                      </span>
+                                    </div>
+                                  )}
+                                </td>
+
+                                <td className="px-6 py-4 text-right">
+                                  {!isChair ? (
+                                    <div className="flex items-center justify-end gap-2">
+                                      {member.sigId && (
+                                        <button
+                                          onClick={() =>
+                                            handleRemoveFromDomain(
+                                              member.profileId,
+                                              member.fullName
+                                            )
+                                          }
+                                          disabled={isBusy}
+                                          className="p-1.5 text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10 rounded-md transition-colors"
+                                          title="Remove from Domain"
+                                        >
+                                          <UserMinus className="h-4 w-4" />
+                                        </button>
+                                      )}
+
                                       <button
                                         onClick={() =>
-                                          handleRemoveFromDomain(
+                                          handleDeleteUserAccount(
                                             member.profileId,
                                             member.fullName
                                           )
                                         }
                                         disabled={isBusy}
-                                        className="p-1.5 text-zinc-500 hover:text-amber-400 hover:bg-amber-500/10 rounded-md transition-colors"
-                                        title="Remove from Domain"
+                                        className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-md transition-colors inline-flex items-center justify-center disabled:opacity-50"
+                                        title="Permanently Delete Account"
                                       >
-                                        <UserMinus className="h-4 w-4" />
+                                        {isBusy ? (
+                                          <Loader2 className="h-4 w-4 animate-spin text-red-400" />
+                                        ) : (
+                                          <Trash2 className="h-4 w-4" />
+                                        )}
                                       </button>
-                                    )}
-
-                                    <button
-                                      onClick={() =>
-                                        handleDeleteUserAccount(
-                                          member.profileId,
-                                          member.fullName
-                                        )
-                                      }
-                                      disabled={isBusy}
-                                      className="p-1.5 text-zinc-500 hover:text-red-400 hover:bg-red-500/10 rounded-md transition-colors inline-flex items-center justify-center disabled:opacity-50"
-                                      title="Permanently Delete Account"
-                                    >
-                                      {isBusy ? (
-                                        <Loader2 className="h-4 w-4 animate-spin text-red-400" />
-                                      ) : (
-                                        <Trash2 className="h-4 w-4" />
-                                      )}
-                                    </button>
-                                  </div>
-                                ) : (
-                                  <span className="text-[10px] text-blue-400 font-mono pr-2">
-                                    ACTIVE INCUMBENT
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
+                                    </div>
+                                  ) : (
+                                    <span className="text-[10px] text-blue-400 font-mono pr-2">
+                                      ACTIVE INCUMBENT
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </div>
             </div>
