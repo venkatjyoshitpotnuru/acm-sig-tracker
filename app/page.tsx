@@ -83,7 +83,7 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="border-t border-zinc-800/60 py-8 text-center">
         <p className="text-xs text-zinc-600 font-medium">
-          &copy; {new Date().getFullYear()} ACM Student Chapter. All rights reserved.
+          &copy; 2026 ACM Student Chapter. All rights reserved.
         </p>
       </footer>
     </div>
