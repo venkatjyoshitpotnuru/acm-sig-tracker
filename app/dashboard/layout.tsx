@@ -21,6 +21,8 @@ export default function DashboardLayout({
     full_name: string | null;
     email: string | null;
     global_role: string;
+    sig_role: string | null;
+    sig_name: string | null;
     roll_number?: string | null;
   } | null>(null);
 
@@ -33,27 +35,44 @@ export default function DashboardLayout({
         return;
       }
 
-      // Fetch user profile from database
-      const { data, error } = await supabase
+      // 1. Fetch user profile
+      const { data: profileData } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', session.user.id)
         .maybeSingle();
 
-      const userRole = data?.global_role || session.user.user_metadata?.global_role || 'MEMBER';
+      // 2. Fetch domain membership to verify if user is LEAD
+      const { data: membershipData } = await supabase
+        .from('sig_memberships')
+        .select('role, sigs(name)')
+        .eq('user_id', session.user.id)
+        .eq('status', 'APPROVED')
+        .maybeSingle();
+
+      const userGlobalRole = profileData?.global_role || session.user.user_metadata?.global_role || 'MEMBER';
+      const userSigRole = membershipData?.role || null;
+      const sigName = (membershipData?.sigs as any)?.name || null;
 
       const userProfile = {
         id: session.user.id,
-        full_name: data?.full_name || session.user.user_metadata?.full_name || 'Member',
+        full_name: profileData?.full_name || session.user.user_metadata?.full_name || 'Member',
         email: session.user.email || '',
-        global_role: userRole,
-        roll_number: data?.roll_number || session.user.email?.split('@')[0]?.toUpperCase() || 'ACM-MEMBER'
+        global_role: userGlobalRole,
+        sig_role: userSigRole,
+        sig_name: sigName,
+        roll_number: profileData?.roll_number || session.user.email?.split('@')[0]?.toUpperCase() || 'ACM-MEMBER'
       };
 
       setProfile(userProfile);
 
-      // Security Guard: Prevent non-chairs from accessing Chair Executive Suite
-      if (pathname.startsWith('/dashboard/chair') && userRole !== 'CHAIR') {
+      // Route Guards
+      if (pathname.startsWith('/dashboard/chair') && userGlobalRole !== 'CHAIR') {
+        router.replace('/dashboard/member');
+        return;
+      }
+
+      if (pathname.startsWith('/dashboard/lead') && userSigRole !== 'LEAD' && userGlobalRole !== 'CHAIR') {
         router.replace('/dashboard/member');
         return;
       }
@@ -78,6 +97,7 @@ export default function DashboardLayout({
   }
 
   const isChair = profile?.global_role === 'CHAIR';
+  const isLead = profile?.sig_role === 'LEAD';
   const displayName = profile?.full_name || profile?.email?.split('@')[0] || 'User';
   const roll = profile?.roll_number || 'ACM-MEMBER';
 
@@ -101,7 +121,7 @@ export default function DashboardLayout({
             <div className="h-4 w-px bg-blue-950" />
 
             <div className="flex items-center gap-1.5">
-              {/* Only show Executive Suite to confirmed CHAIR accounts */}
+              {/* Visible to Chair */}
               {isChair && (
                 <Link
                   href="/dashboard/chair"
@@ -114,7 +134,22 @@ export default function DashboardLayout({
                   Executive Suite
                 </Link>
               )}
+
+              {/* Visible to Leads & Chairs */}
+              {(isLead || isChair) && (
+                <Link
+                  href="/dashboard/lead"
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    pathname.startsWith('/dashboard/lead')
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60'
+                  }`}
+                >
+                  Domain Lead Suite
+                </Link>
+              )}
               
+              {/* Member Workspace */}
               <Link
                 href="/dashboard/member"
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
@@ -133,11 +168,15 @@ export default function DashboardLayout({
             <div className="text-right hidden sm:block">
               <div className="flex items-center justify-end gap-1.5">
                 <span className="text-xs font-semibold text-zinc-200">{displayName}</span>
-                {isChair && (
-                  <span className="px-1.5 py-0.2 rounded bg-blue-600/20 border border-blue-500/30 text-[10px] font-semibold text-blue-400">
+                {isChair ? (
+                  <span className="px-1.5 py-0.5 rounded bg-blue-600/20 border border-blue-500/30 text-[10px] font-semibold text-blue-400">
                     CHAIR
                   </span>
-                )}
+                ) : isLead ? (
+                  <span className="px-1.5 py-0.5 rounded bg-emerald-600/20 border border-emerald-500/30 text-[10px] font-semibold text-emerald-400">
+                    {profile?.sig_name ? `${profile.sig_name} LEAD` : 'LEAD'}
+                  </span>
+                ) : null}
               </div>
               <span className="text-[11px] text-zinc-500 uppercase tracking-wider font-mono">
                 {roll}
