@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -10,7 +10,9 @@ import {
   Users,
   Loader2,
   CheckCircle2,
-  ListFilter
+  ChevronDown,
+  ChevronUp,
+  Circle
 } from 'lucide-react';
 
 interface Subtask {
@@ -43,6 +45,26 @@ interface SigTask {
   subtasks: Subtask[];
 }
 
+interface GroupedDeliverable {
+  title: string;
+  description: string;
+  due_date: string;
+  priority: 'LOW' | 'MEDIUM' | 'HIGH';
+  sig_id: string;
+  taskIds: string[];
+  members: {
+    taskId: string;
+    userId: string;
+    name: string;
+    rollNumber: string;
+    subtasks: Subtask[];
+    completedCount: number;
+    totalCount: number;
+    pct: number;
+  }[];
+  overallPct: number;
+}
+
 export default function LeadDashboard() {
   const router = useRouter();
   const supabase = createClient();
@@ -56,6 +78,7 @@ export default function LeadDashboard() {
   const [domainMembers, setDomainMembers] = useState<DomainMember[]>([]);
   const [tasks, setTasks] = useState<SigTask[]>([]);
   const [activeTab, setActiveTab] = useState<'roster' | 'tasks'>('roster');
+  const [expandedDeliverable, setExpandedDeliverable] = useState<string | null>(null);
 
   // Task Creation Form State
   const [title, setTitle] = useState('');
@@ -86,7 +109,7 @@ export default function LeadDashboard() {
     const uid = session.user.id;
     setCurrentUserId(uid);
 
-    // 1. Fetch Lead membership to identify which SIG this user leads
+    // 1. Fetch Lead membership
     const { data: leadMembership, error: leadError } = await supabase
       .from('sig_memberships')
       .select('sig_id, role, sigs(id, name)')
@@ -106,7 +129,7 @@ export default function LeadDashboard() {
 
     setLeadSig({ id: activeSig.id, name: activeSig.name });
 
-    // 2. Fetch ONLY members and deliverables belonging to THIS specific SIG
+    // 2. Fetch members, tasks, and SUBTASKS STRICTLY ORDERED by created_at ascending
     const [
       { data: membershipsData },
       { data: profilesData },
@@ -124,14 +147,17 @@ export default function LeadDashboard() {
         .select('*')
         .eq('sig_id', activeSig.id)
         .order('created_at', { ascending: false }),
-      supabase.from('subtasks').select('*')
+      supabase
+        .from('subtasks')
+        .select('*')
+        .order('created_at', { ascending: true }) // Preserves insertion order (c before n)
     ]);
 
     const profs = profilesData || [];
     const taskList = tasksData || [];
     const subList: Subtask[] = subtasksData || [];
 
-    // Map tasks with subtasks
+    // Map tasks with ordered subtasks
     const fullTasks: SigTask[] = taskList.map((t: any) => {
       const assignedProf = profs.find((p: any) => p.id === t.assigned_to);
       return {
@@ -142,7 +168,7 @@ export default function LeadDashboard() {
     });
     setTasks(fullTasks);
 
-    // Calculate Member Roster & individual progress
+    // Member Roster & individual progress calculation
     const members: DomainMember[] = (membershipsData || []).map((m: any) => {
       const p = profs.find((prof: any) => prof.id === m.user_id);
       const userTasks = fullTasks.filter((t) => t.assigned_to === m.user_id);
@@ -170,12 +196,61 @@ export default function LeadDashboard() {
 
     setDomainMembers(members);
 
-    if (members.length > 0) {
+    if (members.length > 0 && !selectedMemberId) {
       setSelectedMemberId(members[0].userId);
     }
 
     setLoading(false);
   };
+
+  // Group multiple user task rows of the same assignment into one unified deliverable card
+  const groupedDeliverables: GroupedDeliverable[] = useMemo(() => {
+    const groups: { [key: string]: GroupedDeliverable } = {};
+
+    tasks.forEach((t) => {
+      const key = `${t.title}__${t.due_date || ''}`;
+      const completedSubs = t.subtasks.filter((s) => s.is_completed).length;
+      const totalSubs = t.subtasks.length;
+      const pct = totalSubs > 0 ? Math.round((completedSubs / totalSubs) * 100) : 0;
+
+      const memberObj = {
+        taskId: t.id,
+        userId: t.assigned_to,
+        name: t.assigneeName || 'Member',
+        rollNumber: domainMembers.find((m) => m.userId === t.assigned_to)?.rollNumber || '',
+        subtasks: t.subtasks,
+        completedCount: completedSubs,
+        totalCount: totalSubs,
+        pct
+      };
+
+      if (!groups[key]) {
+        groups[key] = {
+          title: t.title,
+          description: t.description,
+          due_date: t.due_date,
+          priority: t.priority,
+          sig_id: t.sig_id,
+          taskIds: [t.id],
+          members: [memberObj],
+          overallPct: 0
+        };
+      } else {
+        groups[key].taskIds.push(t.id);
+        groups[key].members.push(memberObj);
+      }
+    });
+
+    // Calculate aggregated completion percentage for each grouped deliverable
+    return Object.values(groups).map((group) => {
+      const totalAllSubs = group.members.reduce((acc, m) => acc + m.totalCount, 0);
+      const completedAllSubs = group.members.reduce((acc, m) => acc + m.completedCount, 0);
+      return {
+        ...group,
+        overallPct: totalAllSubs > 0 ? Math.round((completedAllSubs / totalAllSubs) * 100) : 0
+      };
+    });
+  }, [tasks, domainMembers]);
 
   const handleAddSubtaskInput = () => {
     setSubtaskList([...subtaskList, '']);
@@ -223,13 +298,17 @@ export default function LeadDashboard() {
     setSubmitting(true);
 
     try {
+      // Clean subtasks in order
+      const cleanSubtasks = subtaskList
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+
       for (const uid of targetAssigneeIds) {
-        // Insert with created_by field included
         const { data: insertedTask, error: taskErr } = await supabase
           .from('tasks')
           .insert({
             sig_id: leadSig.id,
-            created_by: currentUserId, // Fixes not-null constraint
+            created_by: currentUserId,
             assigned_to: uid,
             title,
             description,
@@ -241,19 +320,15 @@ export default function LeadDashboard() {
 
         if (taskErr) throw taskErr;
 
-        const cleanSubtasks = subtaskList
-          .map((s) => s.trim())
-          .filter((s) => s.length > 0);
-
+        // Insert subtasks in chronological sequence so created_at preserves input order
         if (cleanSubtasks.length > 0 && insertedTask) {
-          const subtaskPayload = cleanSubtasks.map((stTitle) => ({
-            task_id: insertedTask.id,
-            title: stTitle,
-            is_completed: false
-          }));
-
-          const { error: subErr } = await supabase.from('subtasks').insert(subtaskPayload);
-          if (subErr) throw subErr;
+          for (let i = 0; i < cleanSubtasks.length; i++) {
+            await supabase.from('subtasks').insert({
+              task_id: insertedTask.id,
+              title: cleanSubtasks[i],
+              is_completed: false
+            });
+          }
         }
       }
 
@@ -263,6 +338,7 @@ export default function LeadDashboard() {
       setPriority('MEDIUM');
       setSubtaskList(['']);
       await fetchLeadDashboard();
+      setActiveTab('tasks');
     } catch (err: any) {
       alert('Failed to assign task: ' + err.message);
     } finally {
@@ -270,11 +346,13 @@ export default function LeadDashboard() {
     }
   };
 
-  const handleDeleteTask = async (taskId: string) => {
-    if (!confirm('Are you sure you want to delete this deliverable?')) return;
-    await supabase.from('subtasks').delete().eq('task_id', taskId);
-    await supabase.from('tasks').delete().eq('id', taskId);
-    setTasks((prev) => prev.filter((t) => t.id !== taskId));
+  const handleDeleteGroupedDeliverable = async (taskIds: string[]) => {
+    if (!confirm('Are you sure you want to delete this deliverable for all assigned members?')) return;
+    for (const tid of taskIds) {
+      await supabase.from('subtasks').delete().eq('task_id', tid);
+      await supabase.from('tasks').delete().eq('id', tid);
+    }
+    await fetchLeadDashboard();
   };
 
   if (loading) {
@@ -321,7 +399,7 @@ export default function LeadDashboard() {
                 : 'text-zinc-400 hover:text-zinc-200'
             }`}
           >
-            Active Deliverables ({tasks.length})
+            Active Deliverables ({groupedDeliverables.length})
           </button>
         </div>
       </div>
@@ -456,10 +534,10 @@ export default function LeadDashboard() {
               )}
             </div>
 
-            {/* CHECKLIST / SUBTASKS */}
+            {/* CHECKLIST / SUBTASKS (Ordered steps) */}
             <div className="border-t border-blue-950/60 pt-4">
               <div className="flex items-center justify-between mb-2">
-                <label className="text-xs font-medium text-zinc-400">Milestone Steps</label>
+                <label className="text-xs font-medium text-zinc-400">Milestone Steps (Preserves order)</label>
                 <button
                   type="button"
                   onClick={handleAddSubtaskInput}
@@ -472,6 +550,7 @@ export default function LeadDashboard() {
               <div className="space-y-2">
                 {subtaskList.map((st, index) => (
                   <div key={index} className="flex items-center gap-2">
+                    <span className="text-xs text-zinc-500 font-mono w-4">{index + 1}.</span>
                     <input
                       type="text"
                       placeholder={`Step ${index + 1}`}
@@ -504,7 +583,7 @@ export default function LeadDashboard() {
           </form>
         </div>
 
-        {/* RIGHT COLUMN: SWITCHABLE ROSTER & DELIVERABLES */}
+        {/* RIGHT COLUMN: SWITCHABLE ROSTER & UNIFIED DELIVERABLES */}
         <div className="lg:col-span-2 space-y-4">
 
           {/* VIEW 1: DOMAIN ROSTER & PROGRESS TABLE */}
@@ -589,81 +668,142 @@ export default function LeadDashboard() {
             </div>
           )}
 
-          {/* VIEW 2: ACTIVE DELIVERABLES */}
+          {/* VIEW 2: UNIFIED DELIVERABLES WITH MEMBER PROGRESS DROPDOWNS */}
           {activeTab === 'tasks' && (
-            <div className="space-y-3">
-              {tasks.length === 0 ? (
+            <div className="space-y-4">
+              {groupedDeliverables.length === 0 ? (
                 <div className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-12 text-center text-zinc-500 text-sm">
                   No deliverables currently assigned. Use the form on the left to assign tasks.
                 </div>
               ) : (
-                tasks.map((task) => {
-                  const completedSubs = task.subtasks.filter((s) => s.is_completed).length;
-                  const totalSubs = task.subtasks.length;
-                  const pct = totalSubs > 0 ? Math.round((completedSubs / totalSubs) * 100) : 0;
+                groupedDeliverables.map((group) => {
+                  const key = `${group.title}__${group.due_date}`;
+                  const isExpanded = expandedDeliverable === key;
 
                   return (
                     <div
-                      key={task.id}
-                      className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl p-5 shadow-md hover:border-blue-900/60 transition-all"
+                      key={key}
+                      className="bg-[#0c1222]/80 border border-blue-950/70 rounded-xl overflow-hidden shadow-md transition-all"
                     >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="space-y-1">
-                          <div className="flex items-center gap-2">
-                            <h3 className="font-semibold text-zinc-100 text-sm">{task.title}</h3>
+                      {/* DELIVERABLE HEADER CARD */}
+                      <div className="p-5 flex items-start justify-between gap-4">
+                        <div className="space-y-1.5">
+                          <div className="flex items-center gap-2.5">
+                            <h3 className="font-semibold text-white text-base">{group.title}</h3>
                             <span
                               className={`text-[10px] px-2 py-0.5 rounded font-bold uppercase tracking-wider ${
-                                task.priority === 'HIGH'
+                                group.priority === 'HIGH'
                                   ? 'bg-red-500/10 text-red-400 border border-red-500/20'
-                                  : task.priority === 'MEDIUM'
+                                  : group.priority === 'MEDIUM'
                                   ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                                   : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
                               }`}
                             >
-                              {task.priority}
+                              {group.priority}
                             </span>
                           </div>
-                          {task.description && (
-                            <p className="text-xs text-zinc-400 leading-relaxed">{task.description}</p>
+
+                          {group.description && (
+                            <p className="text-xs text-zinc-400 leading-relaxed">{group.description}</p>
                           )}
-                        </div>
 
-                        <button
-                          onClick={() => handleDeleteTask(task.id)}
-                          className="text-zinc-500 hover:text-red-400 p-1.5 rounded-lg hover:bg-red-500/10 transition-colors"
-                          title="Delete Deliverable"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-
-                      <div className="mt-4 pt-3 border-t border-blue-950/40 flex flex-wrap items-center justify-between gap-3 text-xs">
-                        <div className="flex items-center gap-4 text-zinc-400">
-                          <span className="flex items-center gap-1.5">
-                            <Users className="h-3.5 w-3.5 text-blue-400" />
-                            <strong className="text-zinc-300 font-medium">{task.assigneeName}</strong>
-                          </span>
-                          {task.due_date && (
+                          <div className="flex flex-wrap items-center gap-4 text-xs text-zinc-400 pt-1">
                             <span className="flex items-center gap-1.5">
-                              <Calendar className="h-3.5 w-3.5 text-zinc-500" />
-                              {task.due_date}
+                              <Users className="h-3.5 w-3.5 text-blue-400" />
+                              <strong className="text-zinc-200">
+                                {group.members.length} {group.members.length === 1 ? 'Member' : 'Members'} Assigned
+                              </strong>
                             </span>
-                          )}
+                            {group.due_date && (
+                              <span className="flex items-center gap-1.5">
+                                <Calendar className="h-3.5 w-3.5 text-zinc-500" />
+                                {group.due_date}
+                              </span>
+                            )}
+                          </div>
                         </div>
 
                         <div className="flex items-center gap-3">
-                          <span className="text-zinc-500">
-                            Milestones: <strong className="text-zinc-300">{completedSubs}/{totalSubs}</strong>
-                          </span>
-                          <div className="w-24 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-blue-500 rounded-full"
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                          <span className="text-blue-400 font-mono text-[11px]">{pct}%</span>
+                          <button
+                            onClick={() => handleDeleteGroupedDeliverable(group.taskIds)}
+                            className="text-zinc-500 hover:text-red-400 p-2 rounded-lg hover:bg-red-500/10 transition-colors"
+                            title="Delete this Deliverable"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
                         </div>
                       </div>
+
+                      {/* OVERALL PROGRESS & ACCORDION BUTTON */}
+                      <div className="bg-[#070b14]/70 px-5 py-3 border-t border-blue-950/60 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs text-zinc-400">Total Completion:</span>
+                          <div className="w-28 h-2 bg-zinc-800 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                              style={{ width: `${group.overallPct}%` }}
+                            />
+                          </div>
+                          <span className="text-xs font-mono text-blue-400 font-semibold">{group.overallPct}%</span>
+                        </div>
+
+                        <button
+                          onClick={() => setExpandedDeliverable(isExpanded ? null : key)}
+                          className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 font-medium px-2 py-1 rounded-md transition-colors"
+                        >
+                          <span>{isExpanded ? 'Hide Member Breakdown' : 'View Member Progress Breakdown'}</span>
+                          {isExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                        </button>
+                      </div>
+
+                      {/* ACCORDION CONTENT: EACH MEMBER'S INDIVIDUAL MILESTONE BREAKDOWN */}
+                      {isExpanded && (
+                        <div className="divide-y divide-blue-950/40 bg-[#070b14]/90 p-5 space-y-4">
+                          {group.members.map((member) => (
+                            <div key={member.taskId} className="pt-3 first:pt-0 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <span className="text-xs font-semibold text-zinc-200">{member.name}</span>
+                                  <span className="text-[11px] text-zinc-500 ml-2 font-mono uppercase">
+                                    {member.rollNumber}
+                                  </span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs text-zinc-400">
+                                    {member.completedCount}/{member.totalCount} completed
+                                  </span>
+                                  <span className="text-xs font-mono text-emerald-400 font-semibold">
+                                    {member.pct}%
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* Member Specific Checklist with Strict Ordered Steps */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 pl-2">
+                                {member.subtasks.map((st, idx) => (
+                                  <div
+                                    key={st.id || idx}
+                                    className={`flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-md border ${
+                                      st.is_completed
+                                        ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300'
+                                        : 'bg-zinc-900/60 border-zinc-800 text-zinc-400'
+                                    }`}
+                                  >
+                                    {st.is_completed ? (
+                                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+                                    ) : (
+                                      <Circle className="h-3.5 w-3.5 text-zinc-600 shrink-0" />
+                                    )}
+                                    <span className={st.is_completed ? 'line-through text-zinc-500' : ''}>
+                                      {st.title}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   );
                 })
