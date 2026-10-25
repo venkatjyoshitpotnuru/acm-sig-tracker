@@ -4,7 +4,8 @@ import { useEffect, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
-import { LogOut, Loader2, Shield } from 'lucide-react';
+import { LogOut, Loader2 } from 'lucide-react';
+import Image from 'next/image';
 
 interface UserProfileState {
   id: string;
@@ -30,9 +31,7 @@ export default function DashboardLayout({
 
   useEffect(() => {
     async function checkAuthAndRole() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      const { data: { session } } = await supabase.auth.getSession();
 
       if (!session) {
         router.push('/login');
@@ -43,24 +42,16 @@ export default function DashboardLayout({
 
       const [{ data: profileData }, { data: membershipsData }] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', uid).maybeSingle(),
-        supabase
-          .from('sig_memberships')
-          .select('role, sig_id, status, sigs(name)')
-          .eq('user_id', uid)
-          .eq('status', 'APPROVED'),
+        supabase.from('sig_memberships').select('role, sig_id, status, sigs(name)').eq('user_id', uid).eq('status', 'APPROVED'),
       ]);
 
       const globalRole = profileData?.global_role || session.user.user_metadata?.global_role || 'MEMBER';
 
-      const leadMembership = (membershipsData || []).find(
-        (m: any) => m.role?.toUpperCase() === 'LEAD'
-      );
+      const leadMembership = (membershipsData || []).find((m: any) => m.role?.toUpperCase() === 'LEAD');
 
       let domainName: string | null = null;
       if (leadMembership?.sigs) {
-        domainName = Array.isArray(leadMembership.sigs)
-          ? leadMembership.sigs[0]?.name
-          : (leadMembership.sigs as any)?.name;
+        domainName = Array.isArray(leadMembership.sigs) ? leadMembership.sigs[0]?.name : (leadMembership.sigs as any)?.name;
       }
 
       const userState: UserProfileState = {
@@ -70,10 +61,7 @@ export default function DashboardLayout({
         globalRole: globalRole,
         isLead: Boolean(leadMembership),
         leadDomainName: domainName,
-        rollNumber:
-          profileData?.roll_number ||
-          session.user.email?.split('@')[0]?.toUpperCase() ||
-          'ACM-MEMBER',
+        rollNumber: profileData?.roll_number || session.user.email?.split('@')[0]?.toUpperCase() || 'ACM-MEMBER',
       };
 
       setProfile(userState);
@@ -83,11 +71,7 @@ export default function DashboardLayout({
         return;
       }
 
-      if (
-        pathname.startsWith('/dashboard/lead') &&
-        !userState.isLead &&
-        userState.globalRole !== 'CHAIR'
-      ) {
+      if (pathname.startsWith('/dashboard/lead') && !userState.isLead && userState.globalRole !== 'CHAIR') {
         router.replace('/dashboard/member');
         return;
       }
@@ -121,8 +105,19 @@ export default function DashboardLayout({
           
           <div className="flex items-center gap-4">
             <Link href="/" className="flex items-center gap-2.5">
-              <div className="h-9 w-9 rounded-xl bg-blue-900 border border-blue-800 flex items-center justify-center font-bold text-blue-400 text-sm">
-                ACM
+              {/* UPDATED LOGO RENDER */}
+              <div className="h-8 w-8 rounded-full overflow-hidden bg-white flex items-center justify-center border border-zinc-700">
+                {/* Fallback to native img tag to avoid complex Next/Image config issues if next.config.js isn't setup for remote patterns */}
+                <img 
+                  src="/acm-logo.jpg" 
+                  alt="ACM Logo" 
+                  className="h-full w-full object-cover"
+                  onError={(e) => {
+                    // Fallback if image doesn't exist
+                    e.currentTarget.style.display = 'none';
+                    e.currentTarget.parentElement!.innerHTML = '<span class="text-blue-500 font-bold text-xs">ACM</span>';
+                  }}
+                />
               </div>
               <span className="font-bold text-sm tracking-tight text-white hidden sm:inline-block">
                 ACM Portal
@@ -136,23 +131,18 @@ export default function DashboardLayout({
                 <Link
                   href="/dashboard/chair"
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                    pathname.startsWith('/dashboard/chair')
-                      ? 'bg-blue-600 text-white'
-                      : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
+                    pathname.startsWith('/dashboard/chair') ? 'bg-blue-600 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
                   }`}
                 >
                   Executive Suite
                 </Link>
               )}
 
-              {/* Only show Domain Lead Suite if they are actually a Lead (Chairs won't see it unless they are also a lead) */}
               {isLead && !isChair && (
                 <Link
                   href="/dashboard/lead"
                   className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                    pathname.startsWith('/dashboard/lead')
-                      ? 'bg-blue-600 text-white'
-                      : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
+                    pathname.startsWith('/dashboard/lead') ? 'bg-blue-600 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
                   }`}
                 >
                   Domain Lead Suite
@@ -162,9 +152,7 @@ export default function DashboardLayout({
               <Link
                 href="/dashboard/member"
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
-                  pathname.startsWith('/dashboard/member')
-                    ? 'bg-blue-600 text-white'
-                    : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
+                  pathname.startsWith('/dashboard/member') ? 'bg-blue-600 text-white' : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
                 }`}
               >
                 Student Portal
@@ -175,29 +163,17 @@ export default function DashboardLayout({
           <div className="flex items-center gap-4">
             <div className="text-right hidden sm:block">
               <div className="flex items-center justify-end gap-1.5">
-                <span className="text-xs font-semibold text-zinc-200">
-                  {profile?.fullName}
-                </span>
+                <span className="text-xs font-semibold text-zinc-200">{profile?.fullName}</span>
                 {isChair ? (
-                  <span className="px-1.5 py-0.5 rounded bg-blue-900 text-[10px] font-semibold text-blue-400 border border-blue-800">
-                    CHAIR
-                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-blue-900 text-[10px] font-semibold text-blue-400 border border-blue-800">CHAIR</span>
                 ) : isLead ? (
-                  <span className="px-1.5 py-0.5 rounded bg-emerald-900 text-[10px] font-semibold text-emerald-400 border border-emerald-800">
-                    {profile?.leadDomainName ? `${profile.leadDomainName} LEAD` : 'LEAD'}
-                  </span>
+                  <span className="px-1.5 py-0.5 rounded bg-emerald-900 text-[10px] font-semibold text-emerald-400 border border-emerald-800">{profile?.leadDomainName ? `${profile.leadDomainName} LEAD` : 'LEAD'}</span>
                 ) : null}
               </div>
-              <span className="text-[11px] text-zinc-500 uppercase tracking-wider font-mono">
-                {profile?.rollNumber}
-              </span>
+              <span className="text-[11px] text-zinc-500 uppercase tracking-wider font-mono">{profile?.rollNumber}</span>
             </div>
 
-            <button
-              onClick={handleSignOut}
-              className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-medium"
-              title="Sign Out"
-            >
+            <button onClick={handleSignOut} className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-medium" title="Sign Out">
               <LogOut className="h-4 w-4" />
               <span className="hidden sm:inline">Sign Out</span>
             </button>

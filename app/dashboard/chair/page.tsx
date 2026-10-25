@@ -5,24 +5,20 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { deleteUserAccount, transferChairAuthority } from '@/app/actions/admin';
 import {
-  ShieldCheck,
   Search,
-  Clock,
   Check,
   X,
   UserMinus,
   Trash2,
   Download,
   Loader2,
-  Users,
-  Activity,
   Crown,
   Layers,
-  CheckCircle2,
   ChevronDown,
   ChevronUp,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Target
 } from 'lucide-react';
 
 interface Subtask {
@@ -95,7 +91,6 @@ export default function ChairDashboard() {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'roster' | 'requests'>('overview');
   
-  // Changed to an array to support multiple expanded blocks simultaneously
   const [expandedSigs, setExpandedSigs] = useState<string[]>([]);
 
   const [sigs, setSigs] = useState<SigItem[]>([]);
@@ -110,6 +105,9 @@ export default function ChairDashboard() {
   const [successorCandidate, setSuccessorCandidate] = useState<ChapterMember | null>(null);
   const [successionConfirmText, setSuccessionConfirmText] = useState('');
   const [transferringSuccession, setTransferringSuccession] = useState(false);
+  
+  // Chapter-wide progress tracker
+  const [chapterCompletionPct, setChapterCompletionPct] = useState(0);
 
   useEffect(() => {
     fetchChairDashboardData();
@@ -146,6 +144,15 @@ export default function ChairDashboard() {
     const tasksWithSubtasks: TaskItem[] = taskList.map((t: any) => ({
       ...t, subtasks: subList.filter((st) => st.task_id === t.id)
     }));
+
+    // Calculate total chapter milestone progress
+    let globalTotalSubs = 0;
+    let globalCompletedSubs = 0;
+    tasksWithSubtasks.forEach((t) => {
+      globalTotalSubs += t.subtasks.length;
+      globalCompletedSubs += t.subtasks.filter((st) => st.is_completed).length;
+    });
+    setChapterCompletionPct(globalTotalSubs > 0 ? Math.round((globalCompletedSubs / globalTotalSubs) * 100) : 0);
 
     const pendingList: DomainRequest[] = [];
     memList.filter((m: any) => m.status === 'PENDING').forEach((m: any) => {
@@ -333,9 +340,11 @@ export default function ChairDashboard() {
         <div className="py-20 text-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-500 mx-auto" /></div>
       ) : (
         <>
+          {/* TAB 1: OVERVIEW & 2x2 DOMAIN HEALTH GRID */}
           {activeTab === 'overview' && (
             <div className="space-y-8">
               
+              {/* Clean solid blocks for metrics */}
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                 <div className="bg-[#0c1222] border border-zinc-800 rounded-lg p-5">
                   <span className="text-xs text-zinc-400 uppercase font-semibold">Total Members</span>
@@ -349,83 +358,77 @@ export default function ChairDashboard() {
                   <span className="text-xs text-zinc-400 uppercase font-semibold">Active Leads</span>
                   <p className="text-3xl font-bold text-white mt-1">{roster.filter(r => r.sigRole === 'LEAD').length}</p>
                 </div>
-                <div className="bg-[#0c1222] border border-zinc-800 rounded-lg p-5">
-                  <span className="text-xs text-zinc-400 uppercase font-semibold">Chapter Status</span>
-                  <p className="text-xl font-bold text-emerald-500 mt-2.5 flex items-center gap-1.5">
-                    <CheckCircle2 className="h-5 w-5" /> Operational
-                  </p>
+                {/* DYNAMIC CHAPTER MILESTONE COMPLETION */}
+                <div className="bg-[#0c1222] border border-zinc-800 rounded-lg p-5 flex flex-col justify-center">
+                  <span className="text-xs text-zinc-400 uppercase font-semibold flex items-center justify-between">
+                    Chapter Progress <Target className="h-3.5 w-3.5 text-blue-500" />
+                  </span>
+                  <div className="mt-2.5 flex items-center justify-between w-full">
+                    <div className="flex-1 mr-3 h-2 bg-zinc-800 rounded-full overflow-hidden">
+                      <div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{ width: `${chapterCompletionPct}%` }} />
+                    </div>
+                    <span className="text-xl font-bold text-blue-400 leading-none">{chapterCompletionPct}%</span>
+                  </div>
                 </div>
               </div>
 
-              <div>
+              <div className="pt-2">
                 <h2 className="text-base font-semibold text-white flex items-center gap-2 mb-4">
                   <Layers className="h-4 w-4 text-blue-400" />
-                  Domain Health & Performance Matrix
+                  Domain Health & Performance
                 </h2>
 
-                {/* Independent Expanding Grid Layout */}
+                {/* Independent Expanding Grid Layout (items-start prevents auto-stretching empty blocks) */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
                   {sigStats.map((stat) => {
                     const isExpanded = expandedSigs.includes(stat.id);
                     const domainMembers = roster.filter(m => m.sigId === stat.id);
 
                     return (
-                      <div key={stat.id} className="bg-[#0c1222] border border-zinc-800 rounded-lg overflow-hidden flex flex-col h-full shadow-sm">
-                        <div className="p-5 flex flex-col h-full justify-between">
+                      <div key={stat.id} className="bg-[#0c1222] border border-zinc-800 rounded-lg overflow-hidden shadow-sm transition-all duration-200">
+                        {/* Domain Block Header (Clickable) */}
+                        <button 
+                          onClick={() => toggleSigExpansion(stat.id)}
+                          className="w-full p-5 flex flex-col hover:bg-zinc-900/30 transition-colors text-left"
+                        >
                           <div className="flex justify-between items-start w-full">
                             <div>
                               <h3 className="font-semibold text-white">{stat.name}</h3>
-                              <p className="text-xs text-zinc-400 mt-0.5">
-                                Lead: {stat.leadName === 'No Lead Assigned' ? <span className="text-zinc-600 italic">Unassigned</span> : <span className="text-emerald-400">{stat.leadName}</span>}
-                              </p>
+                              <p className="text-xs text-zinc-500 mt-0.5">Lead: {stat.leadName}</p>
                             </div>
                             <div className="text-right">
                               <span className="text-xs text-blue-400 font-mono font-medium">{stat.completionRate}%</span>
-                              <div className="text-[10px] text-zinc-500">{stat.memberCount} Enrolled</div>
+                              <div className="text-[10px] text-zinc-500">{stat.memberCount} Members</div>
                             </div>
                           </div>
 
-                          <div className="w-full mt-5 flex items-center justify-between text-[11px] text-zinc-500 font-medium tracking-wide">
-                            <span>{stat.totalTasks} Tasks Assigned</span>
-                            <span>{stat.pendingCount > 0 ? <span className="text-amber-500">{stat.pendingCount} Pending</span> : '0 Pending'}</span>
+                          <div className="w-full mt-4 flex items-center justify-between text-xs text-zinc-400">
+                            <span>Tasks: {stat.totalTasks}</span>
+                            <span>Pending: {stat.pendingCount}</span>
                           </div>
 
-                          <div className="w-full h-1 bg-zinc-900 rounded-full mt-2.5 overflow-hidden">
-                            <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${stat.completionRate}%` }} />
+                          <div className="w-full h-1 bg-zinc-900 rounded-full mt-3 overflow-hidden">
+                            <div className="h-full bg-blue-500 rounded-full transition-all duration-300" style={{ width: `${stat.completionRate}%` }} />
                           </div>
+                        </button>
 
-                          <button 
-                            onClick={() => toggleSigExpansion(stat.id)}
-                            className="mt-4 flex items-center justify-center w-full gap-1.5 py-1.5 text-[11px] font-semibold text-zinc-400 hover:text-white bg-[#070b14] border border-zinc-800 hover:border-zinc-700 rounded-md transition-colors"
-                          >
-                            {isExpanded ? (
-                              <><Minimize2 className="h-3 w-3" /> Hide Roster Breakdown</>
-                            ) : (
-                              <><Maximize2 className="h-3 w-3" /> View Member Details</>
-                            )}
-                          </button>
-                        </div>
-
+                        {/* Expanded Member Details Area */}
                         {isExpanded && (
-                          <div className="bg-[#070b14] border-t border-zinc-800 p-5 space-y-4">
-                            <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Member Progress Breakdown</h4>
+                          <div className="bg-[#070b14] border-t border-zinc-800 p-4 space-y-3">
+                            <h4 className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider mb-2">Member Progress Breakdown</h4>
                             {domainMembers.length === 0 ? (
-                              <div className="text-xs text-zinc-600 text-center py-4">No active members in this domain.</div>
+                              <div className="text-xs text-zinc-600 text-center py-2">No active members in this domain.</div>
                             ) : (
                               domainMembers.map(m => (
                                 <div key={m.profileId} className="flex items-center justify-between">
                                   <div>
-                                    <div className="text-sm text-zinc-200 font-medium">
-                                      {m.fullName}
-                                    </div>
-                                    <div className="text-[10px] text-zinc-500 font-mono mt-0.5">
-                                      {m.rollNumber} {m.sigRole === 'LEAD' ? <span className="text-emerald-500 ml-1">• LEAD</span> : ''}
-                                    </div>
+                                    <div className="text-sm text-zinc-200">{m.fullName}</div>
+                                    <div className="text-[10px] text-zinc-500">{m.rollNumber} {m.sigRole === 'LEAD' ? <span className="text-emerald-500 ml-1">• LEAD</span> : ''}</div>
                                   </div>
                                   <div className="text-right w-24">
-                                    <div className="text-[11px] font-mono text-blue-400 mb-1.5">{m.progressPercent}%</div>
+                                    <div className="text-[11px] font-mono text-blue-400 mb-1">{m.progressPercent}%</div>
                                     <div className="h-1 bg-zinc-800 rounded-full">
-                                      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${m.progressPercent}%` }} />
+                                      <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${m.progressPercent}%` }} />
                                     </div>
                                   </div>
                                 </div>
@@ -450,6 +453,7 @@ export default function ChairDashboard() {
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
                     <input type="text" placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-3 py-2 bg-[#0c1222] border border-zinc-800 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-zinc-600" />
                   </div>
+                  {/* Clean flat button */}
                   <button onClick={() => setShowSuccessionModal(true)} className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg flex items-center gap-1.5 text-xs font-semibold transition-colors">
                     <Crown className="h-4 w-4 text-amber-500" /> <span>Pass Chair</span>
                   </button>
