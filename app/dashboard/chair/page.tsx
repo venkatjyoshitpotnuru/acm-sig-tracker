@@ -18,7 +18,9 @@ import {
   Activity,
   Crown,
   Layers,
-  CheckCircle2
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 interface Subtask {
@@ -90,6 +92,7 @@ export default function ChairDashboard() {
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'roster' | 'requests'>('overview');
+  const [expandedSigId, setExpandedSigId] = useState<string | null>(null);
 
   const [sigs, setSigs] = useState<SigItem[]>([]);
   const [sigStats, setSigStats] = useState<SigStat[]>([]);
@@ -98,7 +101,6 @@ export default function ChairDashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
 
-  // Compact Succession Modal State
   const [showSuccessionModal, setShowSuccessionModal] = useState(false);
   const [successionSearch, setSuccessionSearch] = useState('');
   const [successorCandidate, setSuccessorCandidate] = useState<ChapterMember | null>(null);
@@ -196,7 +198,7 @@ export default function ChairDashboard() {
         memberCount: sigMembers.length, 
         pendingCount: sigPending,
         completionRate,
-        leadName: sigLead ? sigLead.fullName : 'No Lead Assigned'
+        leadName: sigLead ? sigLead.fullName : 'None'
       };
     });
     setSigStats(stats);
@@ -303,16 +305,16 @@ export default function ChairDashboard() {
 
   return (
     <div className="space-y-6">
-      {/* HEADER */}
+      {/* PLAIN FLAT HEADER */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-zinc-800 pb-6">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-white">Executive Suite</h1>
+          <h1 className="text-xl font-bold text-white">Executive Suite</h1>
           <p className="text-xs text-zinc-400 mt-0.5">Chapter-wide governance and administrative controls.</p>
         </div>
-        <div className="flex items-center gap-1 bg-[#0c1222] border border-zinc-800 p-1 rounded-xl shadow-sm">
-          <button onClick={() => setActiveTab('overview')} className={`px-4 py-2 rounded-lg text-xs font-semibold ${activeTab === 'overview' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>Overview</button>
-          <button onClick={() => setActiveTab('roster')} className={`px-4 py-2 rounded-lg text-xs font-semibold ${activeTab === 'roster' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>Roster</button>
-          <button onClick={() => setActiveTab('requests')} className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 ${activeTab === 'requests' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'}`}>
+        <div className="flex items-center gap-1 bg-[#0c1222] border border-zinc-800 p-1 rounded-xl">
+          <button onClick={() => setActiveTab('overview')} className={`px-4 py-2 rounded-lg text-xs font-semibold ${activeTab === 'overview' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'}`}>Overview</button>
+          <button onClick={() => setActiveTab('roster')} className={`px-4 py-2 rounded-lg text-xs font-semibold ${activeTab === 'roster' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'}`}>Roster</button>
+          <button onClick={() => setActiveTab('requests')} className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 ${activeTab === 'requests' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-white'}`}>
             <span>Requests</span>
             {requests.length > 0 && <span className="bg-blue-600 text-white text-[10px] px-1.5 py-0.2 rounded-full font-bold">{requests.length}</span>}
           </button>
@@ -323,108 +325,99 @@ export default function ChairDashboard() {
         <div className="py-20 text-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-500 mx-auto" /></div>
       ) : (
         <>
-          {/* OVERVIEW COMMAND CENTER */}
+          {/* TAB 1: OVERVIEW & 2x2 DOMAIN HEALTH GRID */}
           {activeTab === 'overview' && (
             <div className="space-y-6">
               
-              {/* Top Metrics Row */}
+              {/* Clean solid blocks for metrics */}
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                <div className="bg-[#0c1222] border border-zinc-800 rounded-xl p-5 shadow-sm">
-                  <span className="text-xs text-zinc-400 uppercase tracking-wider font-semibold">Total Members</span>
+                <div className="bg-[#0c1222] border border-zinc-800 rounded-lg p-5">
+                  <span className="text-xs text-zinc-400 uppercase font-semibold">Total Members</span>
                   <p className="text-3xl font-bold text-white mt-1">{roster.length}</p>
                 </div>
-                <div className="bg-[#0c1222] border border-zinc-800 rounded-xl p-5 shadow-sm">
-                  <span className="text-xs text-zinc-400 uppercase tracking-wider font-semibold">Pending Requests</span>
+                <div className="bg-[#0c1222] border border-zinc-800 rounded-lg p-5">
+                  <span className="text-xs text-zinc-400 uppercase font-semibold">Pending Requests</span>
                   <p className="text-3xl font-bold text-white mt-1">{requests.length}</p>
                 </div>
-                <div className="bg-[#0c1222] border border-zinc-800 rounded-xl p-5 shadow-sm">
-                  <span className="text-xs text-zinc-400 uppercase tracking-wider font-semibold">Active Leads</span>
+                <div className="bg-[#0c1222] border border-zinc-800 rounded-lg p-5">
+                  <span className="text-xs text-zinc-400 uppercase font-semibold">Active Leads</span>
                   <p className="text-3xl font-bold text-white mt-1">{roster.filter(r => r.sigRole === 'LEAD').length}</p>
                 </div>
-                <div className="bg-[#0c1222] border border-zinc-800 rounded-xl p-5 shadow-sm">
-                  <span className="text-xs text-zinc-400 uppercase tracking-wider font-semibold">Chapter Status</span>
+                <div className="bg-[#0c1222] border border-zinc-800 rounded-lg p-5">
+                  <span className="text-xs text-zinc-400 uppercase font-semibold">Chapter Status</span>
                   <p className="text-xl font-bold text-emerald-500 mt-2.5 flex items-center gap-1.5">
                     <CheckCircle2 className="h-5 w-5" /> Operational
                   </p>
                 </div>
               </div>
 
-              {/* Detailed SIG Health Matrix */}
-              <div className="bg-[#0c1222] border border-zinc-800 rounded-xl overflow-hidden shadow-sm">
-                <div className="p-5 border-b border-zinc-800 flex items-center justify-between bg-[#070b14]/50">
-                  <div>
-                    <h2 className="text-base font-semibold text-white flex items-center gap-2">
-                      <Layers className="h-4 w-4 text-blue-400" />
-                      Domain Health &amp; Performance Matrix
-                    </h2>
-                    <p className="text-xs text-zinc-400 mt-1">
-                      Comprehensive breakdown of enrollment, leadership, and deliverable completion rates across all Special Interest Groups.
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-sm whitespace-nowrap">
-                    <thead className="bg-[#070b14] border-b border-zinc-800 text-xs text-zinc-500 font-semibold uppercase tracking-wider">
-                      <tr>
-                        <th className="px-6 py-4">Domain</th>
-                        <th className="px-6 py-4">Current Lead</th>
-                        <th className="px-6 py-4 text-center">Enrollment</th>
-                        <th className="px-6 py-4 text-center">Pending Requests</th>
-                        <th className="px-6 py-4 text-center">Assigned Tasks</th>
-                        <th className="px-6 py-4">Overall Completion</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-800/50">
-                      {sigStats.map((stat) => (
-                        <tr key={stat.id} className="hover:bg-zinc-900/30 transition-colors">
-                          <td className="px-6 py-5">
-                            <div className="font-semibold text-zinc-200">{stat.name}</div>
-                          </td>
-                          <td className="px-6 py-5">
-                            {stat.leadName === 'No Lead Assigned' ? (
-                              <span className="text-xs text-amber-500/80 italic font-medium bg-amber-900/20 px-2 py-1 rounded">No Lead Assigned</span>
-                            ) : (
-                              <span className="text-xs text-emerald-400 font-medium bg-emerald-900/20 px-2 py-1 rounded border border-emerald-900/50">
-                                {stat.leadName}
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-6 py-5 text-center">
-                            <span className="text-sm font-medium text-zinc-300">{stat.memberCount}</span>
-                          </td>
-                          <td className="px-6 py-5 text-center">
-                            {stat.pendingCount > 0 ? (
-                              <span className="text-xs font-bold text-amber-400 bg-amber-900/30 px-2 py-1 rounded-full">
-                                {stat.pendingCount}
-                              </span>
-                            ) : (
-                              <span className="text-xs text-zinc-500">0</span>
-                            )}
-                          </td>
-                          <td className="px-6 py-5 text-center">
-                            <span className="text-sm text-zinc-400">{stat.totalTasks}</span>
-                          </td>
-                          <td className="px-6 py-5">
-                            <div className="w-48">
-                              <div className="flex justify-between text-xs mb-1.5">
-                                <span className="text-zinc-500">
-                                  {stat.completedSubtasks} / {stat.totalSubtasks} Milestones
-                                </span>
-                                <span className="text-blue-400 font-mono font-medium">{stat.completionRate}%</span>
-                              </div>
-                              <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
-                                <div
-                                  className="h-full bg-blue-500 rounded-full transition-all duration-500"
-                                  style={{ width: `${stat.completionRate}%` }}
-                                />
-                              </div>
+              <div className="pt-2">
+                <h2 className="text-base font-semibold text-white flex items-center gap-2 mb-4">
+                  <Layers className="h-4 w-4 text-blue-400" />
+                  Domain Health & Performance
+                </h2>
+
+                {/* 2x2 Clean Grid layout for SIGs */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {sigStats.map((stat) => {
+                    const isExpanded = expandedSigId === stat.id;
+                    const domainMembers = roster.filter(m => m.sigId === stat.id);
+
+                    return (
+                      <div key={stat.id} className="bg-[#0c1222] border border-zinc-800 rounded-lg overflow-hidden transition-all">
+                        {/* Domain Block Header (Clickable) */}
+                        <button 
+                          onClick={() => setExpandedSigId(isExpanded ? null : stat.id)}
+                          className="w-full p-5 flex flex-col hover:bg-zinc-900/30 transition-colors text-left"
+                        >
+                          <div className="flex justify-between items-start w-full">
+                            <div>
+                              <h3 className="font-semibold text-white">{stat.name}</h3>
+                              <p className="text-xs text-zinc-500 mt-0.5">Lead: {stat.leadName}</p>
                             </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                            <div className="text-right">
+                              <span className="text-xs text-blue-400 font-mono font-medium">{stat.completionRate}%</span>
+                              <div className="text-[10px] text-zinc-500">{stat.memberCount} Members</div>
+                            </div>
+                          </div>
+
+                          <div className="w-full mt-4 flex items-center justify-between text-xs text-zinc-400">
+                            <span>Tasks: {stat.totalTasks}</span>
+                            <span>Pending: {stat.pendingCount}</span>
+                          </div>
+
+                          <div className="w-full h-1 bg-zinc-900 rounded-full mt-3 overflow-hidden">
+                            <div className="h-full bg-blue-500 rounded-full transition-all" style={{ width: `${stat.completionRate}%` }} />
+                          </div>
+                        </button>
+
+                        {/* Expanded Member Details Area */}
+                        {isExpanded && (
+                          <div className="bg-[#070b14] border-t border-zinc-800 p-4 space-y-3">
+                            <h4 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider mb-2">Member Progress</h4>
+                            {domainMembers.length === 0 ? (
+                              <div className="text-xs text-zinc-500 text-center py-2">No members enrolled.</div>
+                            ) : (
+                              domainMembers.map(m => (
+                                <div key={m.profileId} className="flex items-center justify-between">
+                                  <div>
+                                    <div className="text-sm text-zinc-200">{m.fullName}</div>
+                                    <div className="text-[10px] text-zinc-500">{m.rollNumber} {m.sigRole === 'LEAD' ? '• LEAD' : ''}</div>
+                                  </div>
+                                  <div className="text-right w-24">
+                                    <div className="text-xs text-blue-400 mb-1">{m.progressPercent}%</div>
+                                    <div className="h-1 bg-zinc-800 rounded-full">
+                                      <div className="h-full bg-blue-500 rounded-full" style={{ width: `${m.progressPercent}%` }} />
+                                    </div>
+                                  </div>
+                                </div>
+                              ))
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -439,14 +432,14 @@ export default function ChairDashboard() {
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-500" />
                     <input type="text" placeholder="Search..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="w-full pl-9 pr-3 py-2 bg-[#0c1222] border border-zinc-800 rounded-lg text-sm text-zinc-200 focus:outline-none focus:border-zinc-600" />
                   </div>
-                  {/* Compact Chair Succession Trigger */}
-                  <button onClick={() => setShowSuccessionModal(true)} className="px-3 py-2 bg-amber-900/20 text-amber-500 border border-amber-900/30 hover:bg-amber-900/40 rounded-lg flex items-center gap-1.5 text-xs font-semibold transition-colors">
-                    <Crown className="h-4 w-4" /> <span>Pass Chair</span>
+                  {/* Clean flat button */}
+                  <button onClick={() => setShowSuccessionModal(true)} className="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 rounded-lg flex items-center gap-1.5 text-xs font-semibold transition-colors">
+                    <Crown className="h-4 w-4 text-amber-500" /> <span>Pass Chair</span>
                   </button>
                 </div>
               </div>
 
-              <div className="bg-[#0c1222] border border-zinc-800 rounded-xl overflow-hidden shadow-sm">
+              <div className="bg-[#0c1222] border border-zinc-800 rounded-xl overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm whitespace-nowrap">
                     <thead className="bg-[#070b14] border-b border-zinc-800 text-xs text-zinc-500 font-semibold uppercase tracking-wider">
@@ -488,7 +481,7 @@ export default function ChairDashboard() {
                           <td className="px-6 py-4">
                             {member.globalRole !== 'CHAIR' && (
                               <div className="flex gap-2">
-                                {member.sigId && <button onClick={() => handleRemoveFromDomain(member.profileId, member.fullName)} className="text-zinc-500 hover:text-amber-400 p-1"><UserMinus className="h-4 w-4"/></button>}
+                                {member.sigId && <button onClick={() => handleRemoveFromDomain(member.profileId, member.fullName)} className="text-zinc-500 hover:text-zinc-300 p-1"><UserMinus className="h-4 w-4"/></button>}
                                 <button onClick={() => handleDeleteUserAccount(member.profileId, member.fullName)} className="text-zinc-500 hover:text-red-400 p-1"><Trash2 className="h-4 w-4"/></button>
                               </div>
                             )}
@@ -504,7 +497,7 @@ export default function ChairDashboard() {
 
           {activeTab === 'requests' && (
              <div className="space-y-4">
-             <div className="bg-[#0c1222] border border-zinc-800 rounded-xl overflow-hidden shadow-sm">
+             <div className="bg-[#0c1222] border border-zinc-800 rounded-xl overflow-hidden">
                <div className="p-5 border-b border-zinc-800">
                  <h2 className="font-semibold text-white text-base">Pending Domain Requests</h2>
                </div>
@@ -532,7 +525,7 @@ export default function ChairDashboard() {
         </>
       )}
 
-      {/* COMPACT SUCCESSION SEARCH MODAL */}
+      {/* SUCCESSION SEARCH MODAL */}
       {showSuccessionModal && !successorCandidate && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4">
           <div className="bg-[#0c1222] border border-zinc-800 rounded-xl w-full max-w-md shadow-xl flex flex-col h-[50vh]">
@@ -541,7 +534,7 @@ export default function ChairDashboard() {
               <button onClick={() => setShowSuccessionModal(false)} className="text-zinc-500 hover:text-white p-1"><X className="h-4 w-4"/></button>
             </div>
             <div className="p-4 border-b border-zinc-800">
-              <input type="text" placeholder="Search member to promote..." value={successionSearch} onChange={(e) => setSuccessionSearch(e.target.value)} className="w-full bg-[#070b14] border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-amber-700/50" />
+              <input type="text" placeholder="Search member to promote..." value={successionSearch} onChange={(e) => setSuccessionSearch(e.target.value)} className="w-full bg-[#070b14] border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none" />
             </div>
             <div className="overflow-y-auto flex-1">
               {successionFiltered.length === 0 ? (

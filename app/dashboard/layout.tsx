@@ -41,7 +41,6 @@ export default function DashboardLayout({
 
       const uid = session.user.id;
 
-      // Fetch profile and all approved domain memberships concurrently
       const [{ data: profileData }, { data: membershipsData }] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', uid).maybeSingle(),
         supabase
@@ -53,7 +52,6 @@ export default function DashboardLayout({
 
       const globalRole = profileData?.global_role || session.user.user_metadata?.global_role || 'MEMBER';
 
-      // Find if this user is assigned as 'LEAD' across any of their approved SIGs
       const leadMembership = (membershipsData || []).find(
         (m: any) => m.role?.toUpperCase() === 'LEAD'
       );
@@ -80,7 +78,6 @@ export default function DashboardLayout({
 
       setProfile(userState);
 
-      // Route Access Control
       if (pathname.startsWith('/dashboard/chair') && userState.globalRole !== 'CHAIR') {
         router.replace('/dashboard/member');
         return;
@@ -119,14 +116,12 @@ export default function DashboardLayout({
 
   return (
     <div className="min-h-screen bg-[#070b14] text-zinc-100 flex flex-col font-sans selection:bg-blue-600 selection:text-white">
-      {/* Top Navigation Bar */}
-      <header className="sticky top-0 z-50 border-b border-blue-950/60 bg-[#070b14]/90 backdrop-blur-md">
+      <header className="sticky top-0 z-50 border-b border-zinc-800 bg-[#070b14]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
           
-          {/* Logo & Portal Switcher Tabs */}
           <div className="flex items-center gap-4">
             <Link href="/" className="flex items-center gap-2.5">
-              <div className="h-9 w-9 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center font-bold text-blue-400 text-sm shadow-inner">
+              <div className="h-9 w-9 rounded-xl bg-blue-900 border border-blue-800 flex items-center justify-center font-bold text-blue-400 text-sm">
                 ACM
               </div>
               <span className="font-bold text-sm tracking-tight text-white hidden sm:inline-block">
@@ -134,44 +129,42 @@ export default function DashboardLayout({
               </span>
             </Link>
 
-            <div className="h-4 w-px bg-blue-950" />
+            <div className="h-4 w-px bg-zinc-800" />
 
             <div className="flex items-center gap-1.5">
-              {/* Executive Suite (Chair Only) */}
               {isChair && (
                 <Link
                   href="/dashboard/chair"
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                     pathname.startsWith('/dashboard/chair')
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
                   }`}
                 >
                   Executive Suite
                 </Link>
               )}
 
-              {/* Domain Lead Suite (Visible if Lead of any SIG, or Chair) */}
-              {(isLead || isChair) && (
+              {/* Only show Domain Lead Suite if they are actually a Lead (Chairs won't see it unless they are also a lead) */}
+              {isLead && !isChair && (
                 <Link
                   href="/dashboard/lead"
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                     pathname.startsWith('/dashboard/lead')
-                      ? 'bg-blue-600 text-white shadow-md'
-                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
                   }`}
                 >
                   Domain Lead Suite
                 </Link>
               )}
 
-              {/* Student Portal (Available to all authenticated members) */}
               <Link
                 href="/dashboard/member"
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
                   pathname.startsWith('/dashboard/member')
-                    ? 'bg-blue-600 text-white shadow-md'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/60'
+                    ? 'bg-blue-600 text-white'
+                    : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
                 }`}
               >
                 Student Portal
@@ -179,7 +172,6 @@ export default function DashboardLayout({
             </div>
           </div>
 
-          {/* User Info & Session Actions */}
           <div className="flex items-center gap-4">
             <div className="text-right hidden sm:block">
               <div className="flex items-center justify-end gap-1.5">
@@ -187,11 +179,11 @@ export default function DashboardLayout({
                   {profile?.fullName}
                 </span>
                 {isChair ? (
-                  <span className="px-1.5 py-0.5 rounded bg-blue-600/20 border border-blue-500/30 text-[10px] font-semibold text-blue-400">
+                  <span className="px-1.5 py-0.5 rounded bg-blue-900 text-[10px] font-semibold text-blue-400 border border-blue-800">
                     CHAIR
                   </span>
                 ) : isLead ? (
-                  <span className="px-1.5 py-0.5 rounded bg-emerald-600/20 border border-emerald-500/30 text-[10px] font-semibold text-emerald-400">
+                  <span className="px-1.5 py-0.5 rounded bg-emerald-900 text-[10px] font-semibold text-emerald-400 border border-emerald-800">
                     {profile?.leadDomainName ? `${profile.leadDomainName} LEAD` : 'LEAD'}
                   </span>
                 ) : null}
@@ -203,7 +195,7 @@ export default function DashboardLayout({
 
             <button
               onClick={handleSignOut}
-              className="p-2 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-medium"
+              className="p-2 text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-lg transition-colors flex items-center gap-1.5 text-xs font-medium"
               title="Sign Out"
             >
               <LogOut className="h-4 w-4" />
@@ -213,7 +205,6 @@ export default function DashboardLayout({
         </div>
       </header>
 
-      {/* Page Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {children}
       </main>
