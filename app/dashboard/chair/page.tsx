@@ -16,7 +16,9 @@ import {
   Loader2,
   Users,
   Activity,
-  Crown
+  Crown,
+  Layers,
+  CheckCircle2
 } from 'lucide-react';
 
 interface Subtask {
@@ -49,7 +51,9 @@ interface SigStat extends SigItem {
   totalSubtasks: number;
   completedSubtasks: number;
   memberCount: number;
+  pendingCount: number;
   completionRate: number;
+  leadName: string;
 }
 
 interface ChapterMember {
@@ -85,8 +89,7 @@ export default function ChairDashboard() {
 
   const [loading, setLoading] = useState(true);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'roster' | 'requests' | 'sig-details'>('overview');
-  const [selectedSigTab, setSelectedSigTab] = useState<string>('SIG-AI');
+  const [activeTab, setActiveTab] = useState<'overview' | 'roster' | 'requests'>('overview');
 
   const [sigs, setSigs] = useState<SigItem[]>([]);
   const [sigStats, setSigStats] = useState<SigStat[]>([]);
@@ -176,15 +179,24 @@ export default function ChairDashboard() {
 
     const stats: SigStat[] = sigList.map((sig) => {
       const sigMembers = rosterList.filter((m) => m.sigId === sig.id);
+      const sigLead = sigMembers.find((m) => m.sigRole === 'LEAD');
+      const sigPending = pendingList.filter((p) => p.sigId === sig.id).length;
+      
       const sigTasks = tasksWithSubtasks.filter((t) => t.sig_id === sig.id);
       let totalSub = 0; let completedSub = 0;
       sigTasks.forEach((t) => { totalSub += t.subtasks.length; completedSub += t.subtasks.filter((st) => st.is_completed).length; });
       const completionRate = totalSub > 0 ? Math.round((completedSub / totalSub) * 100) : 0;
 
       return {
-        ...sig, totalTasks: sigTasks.length,
+        ...sig, 
+        totalTasks: sigTasks.length,
         completedTasks: sigTasks.filter((t) => t.subtasks.length > 0 && t.subtasks.every((st) => st.is_completed)).length,
-        totalSubtasks: totalSub, completedSubtasks: completedSub, memberCount: sigMembers.length, completionRate
+        totalSubtasks: totalSub, 
+        completedSubtasks: completedSub, 
+        memberCount: sigMembers.length, 
+        pendingCount: sigPending,
+        completionRate,
+        leadName: sigLead ? sigLead.fullName : 'No Lead Assigned'
       };
     });
     setSigStats(stats);
@@ -255,6 +267,28 @@ export default function ChairDashboard() {
     router.replace('/dashboard/member');
   };
 
+  const handleExportCSV = () => {
+    const headers = ['Full Name', 'Roll Number', 'Semester', 'Domain', 'Role', 'Progress'];
+    const rows = roster.map((r) => [
+      r.fullName,
+      r.rollNumber,
+      r.semester || 'N/A',
+      r.sigName || 'Unassigned',
+      r.globalRole === 'CHAIR' ? 'Chair' : r.sigRole || 'Member',
+      `${r.progressPercent}% (${r.completedSubtasks}/${r.totalSubtasks})`
+    ]);
+    const csvContent =
+      'data:text/csv;charset=utf-8,' +
+      [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+    const encoded = encodeURI(csvContent);
+    const a = document.createElement('a');
+    a.setAttribute('href', encoded);
+    a.setAttribute('download', 'acm_roster.csv');
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   const filteredRoster = roster.filter(m => 
     m.fullName.toLowerCase().includes(searchQuery.toLowerCase()) || 
     m.rollNumber.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -289,13 +323,109 @@ export default function ChairDashboard() {
         <div className="py-20 text-center"><Loader2 className="h-6 w-6 animate-spin text-zinc-500 mx-auto" /></div>
       ) : (
         <>
+          {/* OVERVIEW COMMAND CENTER */}
           {activeTab === 'overview' && (
             <div className="space-y-6">
+              
+              {/* Top Metrics Row */}
               <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                <div className="bg-[#0c1222] border border-zinc-800 rounded-xl p-5 shadow-sm"><span className="text-xs text-zinc-400 uppercase">Total Members</span><p className="text-3xl font-bold text-white mt-1">{roster.length}</p></div>
-                <div className="bg-[#0c1222] border border-zinc-800 rounded-xl p-5 shadow-sm"><span className="text-xs text-zinc-400 uppercase">Requests</span><p className="text-3xl font-bold text-white mt-1">{requests.length}</p></div>
-                <div className="bg-[#0c1222] border border-zinc-800 rounded-xl p-5 shadow-sm"><span className="text-xs text-zinc-400 uppercase">Leads</span><p className="text-3xl font-bold text-white mt-1">{roster.filter(r => r.sigRole === 'LEAD').length}</p></div>
-                <div className="bg-[#0c1222] border border-zinc-800 rounded-xl p-5 shadow-sm"><span className="text-xs text-zinc-400 uppercase">Status</span><p className="text-xl font-bold text-emerald-500 mt-2">Active</p></div>
+                <div className="bg-[#0c1222] border border-zinc-800 rounded-xl p-5 shadow-sm">
+                  <span className="text-xs text-zinc-400 uppercase tracking-wider font-semibold">Total Members</span>
+                  <p className="text-3xl font-bold text-white mt-1">{roster.length}</p>
+                </div>
+                <div className="bg-[#0c1222] border border-zinc-800 rounded-xl p-5 shadow-sm">
+                  <span className="text-xs text-zinc-400 uppercase tracking-wider font-semibold">Pending Requests</span>
+                  <p className="text-3xl font-bold text-white mt-1">{requests.length}</p>
+                </div>
+                <div className="bg-[#0c1222] border border-zinc-800 rounded-xl p-5 shadow-sm">
+                  <span className="text-xs text-zinc-400 uppercase tracking-wider font-semibold">Active Leads</span>
+                  <p className="text-3xl font-bold text-white mt-1">{roster.filter(r => r.sigRole === 'LEAD').length}</p>
+                </div>
+                <div className="bg-[#0c1222] border border-zinc-800 rounded-xl p-5 shadow-sm">
+                  <span className="text-xs text-zinc-400 uppercase tracking-wider font-semibold">Chapter Status</span>
+                  <p className="text-xl font-bold text-emerald-500 mt-2.5 flex items-center gap-1.5">
+                    <CheckCircle2 className="h-5 w-5" /> Operational
+                  </p>
+                </div>
+              </div>
+
+              {/* Detailed SIG Health Matrix */}
+              <div className="bg-[#0c1222] border border-zinc-800 rounded-xl overflow-hidden shadow-sm">
+                <div className="p-5 border-b border-zinc-800 flex items-center justify-between bg-[#070b14]/50">
+                  <div>
+                    <h2 className="text-base font-semibold text-white flex items-center gap-2">
+                      <Layers className="h-4 w-4 text-blue-400" />
+                      Domain Health &amp; Performance Matrix
+                    </h2>
+                    <p className="text-xs text-zinc-400 mt-1">
+                      Comprehensive breakdown of enrollment, leadership, and deliverable completion rates across all Special Interest Groups.
+                    </p>
+                  </div>
+                </div>
+                
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm whitespace-nowrap">
+                    <thead className="bg-[#070b14] border-b border-zinc-800 text-xs text-zinc-500 font-semibold uppercase tracking-wider">
+                      <tr>
+                        <th className="px-6 py-4">Domain</th>
+                        <th className="px-6 py-4">Current Lead</th>
+                        <th className="px-6 py-4 text-center">Enrollment</th>
+                        <th className="px-6 py-4 text-center">Pending Requests</th>
+                        <th className="px-6 py-4 text-center">Assigned Tasks</th>
+                        <th className="px-6 py-4">Overall Completion</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800/50">
+                      {sigStats.map((stat) => (
+                        <tr key={stat.id} className="hover:bg-zinc-900/30 transition-colors">
+                          <td className="px-6 py-5">
+                            <div className="font-semibold text-zinc-200">{stat.name}</div>
+                          </td>
+                          <td className="px-6 py-5">
+                            {stat.leadName === 'No Lead Assigned' ? (
+                              <span className="text-xs text-amber-500/80 italic font-medium bg-amber-900/20 px-2 py-1 rounded">No Lead Assigned</span>
+                            ) : (
+                              <span className="text-xs text-emerald-400 font-medium bg-emerald-900/20 px-2 py-1 rounded border border-emerald-900/50">
+                                {stat.leadName}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-6 py-5 text-center">
+                            <span className="text-sm font-medium text-zinc-300">{stat.memberCount}</span>
+                          </td>
+                          <td className="px-6 py-5 text-center">
+                            {stat.pendingCount > 0 ? (
+                              <span className="text-xs font-bold text-amber-400 bg-amber-900/30 px-2 py-1 rounded-full">
+                                {stat.pendingCount}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-zinc-500">0</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-5 text-center">
+                            <span className="text-sm text-zinc-400">{stat.totalTasks}</span>
+                          </td>
+                          <td className="px-6 py-5">
+                            <div className="w-48">
+                              <div className="flex justify-between text-xs mb-1.5">
+                                <span className="text-zinc-500">
+                                  {stat.completedSubtasks} / {stat.totalSubtasks} Milestones
+                                </span>
+                                <span className="text-blue-400 font-mono font-medium">{stat.completionRate}%</span>
+                              </div>
+                              <div className="h-1.5 w-full bg-zinc-800 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                                  style={{ width: `${stat.completionRate}%` }}
+                                />
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           )}
